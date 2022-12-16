@@ -9,6 +9,10 @@ import (
 	cg "github.com/ethereum/hive/simulators/eth2/common/chain_generators"
 )
 
+// Describe a node setup, which consists of:
+// - Execution Client
+// - Beacon Client
+// - Validator Client
 type NodeDefinition struct {
 	ExecutionClient      string
 	ConsensusClient      string
@@ -52,10 +56,12 @@ func (nodes NodeDefinitions) Shares() []uint64 {
 	return shares
 }
 
-// A validator client bundle consists of:
-// - Execution client
-// - Beacon client
-// - Validator client
+// A node bundles together:
+// - Running Execution client
+// - Running Beacon client
+// - Running Validator client
+// Contains a flag that marks a node that can be used to query
+// test verification information.
 type Node struct {
 	T               *hivesim.T
 	Index           int
