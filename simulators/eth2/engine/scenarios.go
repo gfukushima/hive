@@ -21,7 +21,6 @@ import (
 	"github.com/ethereum/hive/simulators/eth2/common/spoofing/proxy"
 	tn "github.com/ethereum/hive/simulators/eth2/common/testnet"
 	"github.com/protolambda/eth2api"
-	"github.com/protolambda/zrnt/eth2/beacon/bellatrix"
 	beacon "github.com/protolambda/zrnt/eth2/beacon/common"
 	spoof "github.com/rauljordan/engine-proxy/proxy"
 )
@@ -40,9 +39,9 @@ var (
 		TerminalTotalDifficulty: big.NewInt(
 			int64(DEFAULT_TERMINAL_TOTAL_DIFFICULTY),
 		),
-		AltairForkEpoch: common.Big0,
-		MergeForkEpoch:  common.Big0,
-		Eth1Consensus:   &el.ExecutionCliqueConsensus{},
+		AltairForkEpoch:    common.Big0,
+		BellatrixForkEpoch: common.Big0,
+		Eth1Consensus:      &el.ExecutionCliqueConsensus{},
 	}
 
 	// Clients that do not support starting on epoch 0 with all forks enabled.
@@ -51,8 +50,8 @@ var (
 		TerminalTotalDifficulty: big.NewInt(
 			int64(DEFAULT_TERMINAL_TOTAL_DIFFICULTY) * 5,
 		),
-		AltairForkEpoch: common.Big1,
-		MergeForkEpoch:  common.Big2,
+		AltairForkEpoch:    common.Big1,
+		BellatrixForkEpoch: common.Big2,
 	}
 	INCREMENTAL_FORKS_CLIENTS = map[string]bool{
 		"nimbus": true,
@@ -572,8 +571,8 @@ func InvalidPayloadGen(
 			t.Fatalf(
 				"FAIL: Invalid Payload %v was included in slot %d (%v)",
 				invalidPayloadHash,
-				b.Message.Slot,
-				b.Message.StateRoot,
+				b.Slot(),
+				b.StateRoot(),
 			)
 		}
 	}
@@ -668,7 +667,7 @@ func IncorrectHeaderPrevRandaoPayload(
 	if err != nil {
 		t.Fatalf("FAIL: Error during payload verification: %v", err)
 	} else if b != nil {
-		t.Fatalf("FAIL: Invalid Payload %v was included in slot %d (%v)", invalidPayloadHash, b.Message.Slot, b.Message.StateRoot)
+		t.Fatalf("FAIL: Invalid Payload %v was included in slot %d (%v)", invalidPayloadHash, b.StateRoot())
 	}
 }
 
@@ -857,7 +856,12 @@ func InvalidTimestampPayload(
 	if err != nil {
 		t.Fatalf("FAIL: Error during payload verification: %v", err)
 	} else if b != nil {
-		t.Fatalf("FAIL: Invalid Payload %v was included in slot %d (%v)", invalidPayloadHash, b.Message.Slot, b.Message.StateRoot)
+		t.Fatalf(
+			"FAIL: Invalid Payload %v was included in slot %d (%v)",
+			invalidPayloadHash,
+			b.Slot(),
+			b.StateRoot(),
+		)
 	}
 }
 
@@ -899,17 +903,15 @@ func IncorrectTTDConfigEL(
 	time.Sleep(time.Duration(config.SlotTime.Uint64()*5) * time.Second)
 
 	// Try to get the latest execution payload, must be nil
-	b, err := builder.GetLatestExecutionBeaconBlock(ctx)
-	if err != nil {
+	if b, err := builder.GetLatestExecutionBeaconBlock(ctx); err != nil {
 		t.Fatalf(
 			"FAIL: Unable to query for the latest execution payload: %v",
 			err,
 		)
-	}
-	if b != nil {
+	} else if b != nil {
 		t.Fatalf(
 			"FAIL: Execution payload was included in the beacon chain with a misconfigured TTD on the EL: %v",
-			b.Message.StateRoot,
+			b.StateRoot(),
 		)
 	}
 }
@@ -1238,9 +1240,12 @@ func SyncingWithInvalidChain(
 			// Block can't contain an executable payload
 			t.Fatalf("FAIL: Head of the chain is not a bellatrix fork block")
 		}
-		block := versionedBlock.Data.(*bellatrix.SignedBeaconBlock)
-		payload := block.Message.Body.ExecutionPayload
-		if !bytes.Equal(payload.BlockHash[:], lastValidHash[:]) {
+		if payload, err := versionedBlock.ExecutionPayload(); err == nil {
+			t.Fatalf(
+				"FAIL: error getting execution payload: %v",
+				err,
+			)
+		} else if !bytes.Equal(payload.BlockHash[:], lastValidHash[:]) {
 			t.Fatalf(
 				"FAIL: Head does not contain the expected execution payload: %v != %v",
 				payload.BlockHash.String(),
@@ -1270,7 +1275,10 @@ func SyncingWithInvalidChain(
 		if err != nil {
 			t.Fatalf("FAIL: Error during payload verification: %v", err)
 		} else if b != nil {
-			t.Fatalf("FAIL: Invalid Payload (%d) %v was included in slot %d (%v)", i+1, p, b.Message.Slot, b.Message.StateRoot)
+			t.Fatalf(
+				"FAIL: Invalid Payload (%d) %v was included in slot %d (%v)",
+				i+1, p, b.Slot(), b.StateRoot(),
+			)
 		}
 	}
 }
@@ -1393,7 +1401,7 @@ func TTDBeforeBellatrix(
 	config := getClientConfig(n)
 	config = config.Join(&tn.Config{
 		AltairForkEpoch:         common.Big1,
-		MergeForkEpoch:          common.Big2,
+		BellatrixForkEpoch:      common.Big2,
 		TerminalTotalDifficulty: big.NewInt(150),
 		NodeDefinitions: []clients.NodeDefinition{
 			n,
@@ -1649,7 +1657,19 @@ func InvalidQuantityPayloadFields(
 		if err != nil {
 			t.Fatalf("FAIL: Error during payload verification: %v", err)
 		} else if b != nil {
-			t.Logf("FAIL: Invalid Payload #%d, %v (%s), was included in slot %d (%v)", i+1, p, ([]byte)(b.Message.Body.ExecutionPayload.ExtraData), b.Message.Slot, b.Message.StateRoot)
+
+			if execPayload, err := b.ExecutionPayload(); err != nil {
+				t.Logf(
+					"FAIL: Beacon block does not contain a payload, slot %d (%v)",
+					b.Slot(), b.StateRoot(),
+				)
+			} else {
+				t.Logf(
+					"FAIL: Invalid Payload #%d, %v (%x), was included in slot %d (%v)",
+					i+1, p, execPayload.ExtraData, b.Slot(), b.StateRoot(),
+				)
+			}
+
 			// Mark test as failure, but continue checking all variations
 			testFailed = true
 		}
@@ -1737,7 +1757,7 @@ func SyncingWithChainHavingValidTransitionBlock(
 	}
 	t.Logf(
 		"Builder Execution block found on slot %d",
-		builderExecutionBlock.Message.Slot,
+		builderExecutionBlock.Slot(),
 	)
 
 	// We wait until the importer reaches optimistic sync
@@ -1750,7 +1770,7 @@ func SyncingWithChainHavingValidTransitionBlock(
 	defer cancel()
 	_, err = importer.WaitForOptimisticState(
 		optimisticStateCtx,
-		eth2api.BlockIdSlot(builderExecutionBlock.Message.Slot),
+		eth2api.BlockIdSlot(builderExecutionBlock.Slot()),
 		true,
 	)
 	if err != nil {
@@ -1868,7 +1888,7 @@ func SyncingWithChainHavingInvalidTransitionBlock(
 			},
 		},
 		AltairForkEpoch:                 common.Big1,
-		MergeForkEpoch:                  common.Big2,
+		BellatrixForkEpoch:              common.Big2,
 		Eth1Consensus:                   el.ExecutionPreChain{},
 		SafeSlotsToImportOptimistically: safeSlotsToImportOptimistically,
 	})
@@ -1913,8 +1933,7 @@ func SyncingWithChainHavingInvalidTransitionBlock(
 
 	t.Logf(
 		"INFO: First execution block: %d, %v",
-		builderExecutionBlock.Message.Slot,
-		builderExecutionBlock.Message.StateRoot,
+		builderExecutionBlock.Slot(), builderExecutionBlock.StateRoot(),
 	)
 
 	// We wait until the importer reaches optimistic sync
@@ -1927,7 +1946,7 @@ func SyncingWithChainHavingInvalidTransitionBlock(
 	defer cancel()
 	_, err = importer.WaitForOptimisticState(
 		optimisticStateCtx,
-		eth2api.BlockIdSlot(builderExecutionBlock.Message.Slot),
+		eth2api.BlockIdSlot(builderExecutionBlock.Slot()),
 		true,
 	)
 	if err != nil {
@@ -1968,11 +1987,18 @@ func SyncingWithChainHavingInvalidTransitionBlock(
 		t.Fatalf("FAIL: Failed to poll head importer head: %v", err)
 	}
 
-	if headInfo.Header.Message.Slot != (builderExecutionBlock.Message.Slot - 1) {
+	if headInfo.Header.Message.Slot != (builderExecutionBlock.Slot() - 1) {
 		ctxTimeout, cancel := context.WithTimeout(ctx, time.Second*5)
 		defer cancel()
 		var headOptStatus clients.BlockV2OptimisticResponse
-		if exists, err := eth2api.SimpleRequest(ctxTimeout, importer.API, eth2api.FmtGET("/eth/v2/beacon/blocks/%s", eth2api.BlockHead.BlockId()), &headOptStatus); err != nil {
+		if exists, err := eth2api.SimpleRequest(
+			ctxTimeout, importer.API,
+			eth2api.FmtGET(
+				"/eth/v2/beacon/blocks/%s",
+				eth2api.BlockHead.BlockId(),
+			),
+			&headOptStatus,
+		); err != nil {
 			// Block still not synced
 			fmt.Printf(
 				"DEBUG: Queried block %s: %v\n",
@@ -1988,8 +2014,8 @@ func SyncingWithChainHavingInvalidTransitionBlock(
 			"FAIL: Importer head is beyond the invalid execution payload block: importer=%v:%d, builder=%v:%d, execution_optimistic=%t",
 			headInfo.Root,
 			headInfo.Header.Message.Slot,
-			builderExecutionBlock.Message.StateRoot,
-			builderExecutionBlock.Message.Slot,
+			builderExecutionBlock.StateRoot(),
+			builderExecutionBlock.Slot(),
 			headOptStatus.ExecutionOptimistic,
 		)
 	}
@@ -2033,7 +2059,7 @@ func SyncingWithChainHavingInvalidPostTransitionBlock(
 			},
 		},
 		AltairForkEpoch:                 common.Big1,
-		MergeForkEpoch:                  common.Big2,
+		BellatrixForkEpoch:              common.Big2,
 		Eth1Consensus:                   el.ExecutionPreChain{},
 		SafeSlotsToImportOptimistically: safeSlotsToImportOptimistically,
 	})
@@ -2072,12 +2098,11 @@ func SyncingWithChainHavingInvalidPostTransitionBlock(
 	if err != nil || builderExecutionBlock == nil {
 		t.Fatalf("FAIL: Could not find first execution block")
 	}
-	transitionPayloadHash := common.BytesToHash(
-		builderExecutionBlock.Message.Body.ExecutionPayload.BlockHash[:],
-	)
+	execPayload, _ := builderExecutionBlock.ExecutionPayload()
+	transitionPayloadHash := execPayload.BlockHash
 	t.Logf(
 		"Builder Execution block found on slot %d, hash=%s",
-		builderExecutionBlock.Message.Slot,
+		builderExecutionBlock.Slot(),
 		transitionPayloadHash,
 	)
 
@@ -2090,7 +2115,7 @@ func SyncingWithChainHavingInvalidPostTransitionBlock(
 	defer cancel()
 	_, err = importer.WaitForOptimisticState(
 		optimisticStateCtx,
-		eth2api.BlockIdSlot(builderExecutionBlock.Message.Slot),
+		eth2api.BlockIdSlot(builderExecutionBlock.Slot()),
 		true,
 	)
 	if err != nil {
@@ -2138,7 +2163,7 @@ func SyncingWithChainHavingInvalidPostTransitionBlock(
 	if err != nil || block == nil {
 		t.Fatalf("FAIL: Block not found: %v", err)
 	}
-	payload := block.Message.Body.ExecutionPayload
+	payload, _ := block.ExecutionPayload()
 	if common.BytesToHash(payload.BlockHash[:]) != transitionPayloadHash {
 		t.Fatalf(
 			"FAIL: Latest payload in the importer is not the transition payload: %v",
@@ -2417,8 +2442,8 @@ func NoViableHeadDueToOptimisticSync(
 				DisableStartup: true,
 			},
 		},
-		AltairForkEpoch: common.Big1,
-		MergeForkEpoch:  big.NewInt(4), // Slot 128
+		AltairForkEpoch:    common.Big1,
+		BellatrixForkEpoch: big.NewInt(4), // Slot 128
 		Eth1Consensus: el.ExecutionEthashConsensus{
 			MiningNodes: 2,
 		},
@@ -2581,8 +2606,8 @@ forloop:
 	}
 	t.Logf(
 		"INFO: latest valid hash from builder 1: slot %d, root %v",
-		lvhBeaconBlock.Message.Slot,
-		lvhBeaconBlock.Message.StateRoot,
+		lvhBeaconBlock.Slot(),
+		lvhBeaconBlock.StateRoot(),
 	)
 
 	lastInvalidBeaconBlock, err := builder1.GetBeaconBlockByExecutionHash(
@@ -2597,8 +2622,8 @@ forloop:
 	}
 	t.Logf(
 		"INFO: latest invalid hash from builder 1: slot %d, root %v",
-		lastInvalidBeaconBlock.Message.Slot,
-		lastInvalidBeaconBlock.Message.StateRoot,
+		lastInvalidBeaconBlock.Slot(),
+		lastInvalidBeaconBlock.StateRoot(),
 	)
 
 	// Check whether the importer is still optimistic for these blocks
@@ -2615,7 +2640,7 @@ forloop:
 		t.Logf(
 			"INFO: retry %d to obtain beacon block at height %d",
 			20-retriesLeft,
-			lvhBeaconBlock.Message.Slot,
+			lvhBeaconBlock.Slot(),
 		)
 
 		if opt, err := importer.BlockIsOptimistic(ctx, eth2api.BlockHead); err != nil {
@@ -2687,14 +2712,21 @@ forloop:
 	}
 
 	// Check that neither the first invalid payload nor the last invalid payload are included in the importer
+
 	if b, err := importer.GetBeaconBlockByExecutionHash(ctx, invalidHashes[0]); err != nil {
 		t.Fatalf("FAIL: Error querying invalid payload: %v", err)
 	} else if b != nil {
-		t.Fatalf("FAIL: Invalid payload found in importer chain: %d, %v", b.Message.Slot, b.Message.StateRoot)
+		t.Fatalf(
+			"FAIL: Invalid payload found in importer chain: %d, %v",
+			b.Slot(), b.StateRoot(),
+		)
 	}
 	if b, err := importer.GetBeaconBlockByExecutionHash(ctx, invalidPayload); err != nil {
 		t.Fatalf("FAIL: Error querying invalid payload: %v", err)
 	} else if b != nil {
-		t.Fatalf("FAIL: Invalid payload found in importer chain: %d, %v", b.Message.Slot, b.Message.StateRoot)
+		t.Fatalf(
+			"FAIL: Invalid payload found in importer chain: %d, %v",
+			b.Slot(), b.StateRoot(),
+		)
 	}
 }

@@ -13,6 +13,7 @@ RUN apk --no-cache add gcc musl-dev linux-headers cmake make clang build-base cl
 ADD ./engine/hive.go.work /source/go.work
 ADD ./common /source/common
 ADD ./engine /source/engine
+ADD ./engine/hive.go.work /source/go.work
 
 # Build within simulator folder
 WORKDIR /source/engine
