@@ -11,9 +11,11 @@ import (
 
 	"github.com/holiman/uint256"
 	blsu "github.com/protolambda/bls12-381-util"
+	"github.com/protolambda/ztyp/tree"
 	"github.com/protolambda/ztyp/view"
 
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/protolambda/zrnt/eth2/beacon/common"
 	"github.com/protolambda/zrnt/eth2/configs"
 
@@ -56,6 +58,23 @@ type PreparedTestnet struct {
 	keyTranches [][]*cl.KeyDetails
 }
 
+// Prepares the fork timestamps of post-merge forks based on the
+// consensus layer genesis time and the fork epochs
+func prepareExecutionForkConfig(
+	eth2GenesisTime common.Timestamp,
+	config *Config,
+) *params.ChainConfig {
+	chainConfig := params.ChainConfig{}
+	if config.CapellaForkEpoch != nil {
+		if config.CapellaForkEpoch.Uint64() == 0 {
+			chainConfig.ShanghaiTime = big.NewInt(int64(eth2GenesisTime))
+		} else {
+			chainConfig.ShanghaiTime = big.NewInt(int64(eth2GenesisTime) + config.SlotTime.Int64()*32)
+		}
+	}
+	return &chainConfig
+}
+
 // Build all artifacts require to start a testnet.
 func prepareTestnet(
 	t *hivesim.T,
@@ -70,6 +89,7 @@ func prepareTestnet(
 		config.TerminalTotalDifficulty,
 		uint64(eth1GenesisTime),
 		config.Eth1Consensus,
+		prepareExecutionForkConfig(eth2GenesisTime, config),
 	)
 	if config.InitialBaseFeePerGas != nil {
 		eth1Genesis.Genesis.BaseFee = config.InitialBaseFeePerGas
@@ -129,19 +149,18 @@ func prepareTestnet(
 		)
 	}
 	spec.Config.ALTAIR_FORK_VERSION = common.Version{0x01, 0x00, 0x00, 0x0a}
-	if config.MergeForkEpoch != nil {
+	if config.BellatrixForkEpoch != nil {
 		spec.Config.BELLATRIX_FORK_EPOCH = common.Epoch(
-			config.MergeForkEpoch.Uint64(),
+			config.BellatrixForkEpoch.Uint64(),
 		)
 	}
 	spec.Config.BELLATRIX_FORK_VERSION = common.Version{0x02, 0x00, 0x00, 0x0a}
-	// TODO: Requires https://github.com/protolambda/zrnt/pull/38
-	/*
-		if config.CapellaForkEpoch != nil {
-			spec.Config.CAPELLA_FORK_EPOCH = common.Epoch(config.CapellaForkEpoch.Uint64())
-		}
-		spec.Config.CAPELLA_FORK_VERSION = common.Version{0x03, 0x00, 0x00, 0x0a}
-	*/
+	if config.CapellaForkEpoch != nil {
+		spec.Config.CAPELLA_FORK_EPOCH = common.Epoch(
+			config.CapellaForkEpoch.Uint64(),
+		)
+	}
+	spec.Config.CAPELLA_FORK_VERSION = common.Version{0x03, 0x00, 0x00, 0x0a}
 	spec.Config.SHARDING_FORK_VERSION = common.Version{0x04, 0x00, 0x00, 0x0a}
 	if config.ValidatorCount == nil {
 		t.Fatal(fmt.Errorf("ValidatorCount was not configured"))
@@ -156,6 +175,13 @@ func prepareTestnet(
 	}
 	tdd, _ := uint256.FromBig(config.TerminalTotalDifficulty)
 	spec.Config.TERMINAL_TOTAL_DIFFICULTY = view.Uint256View(*tdd)
+	if el.IsEth1GenesisPostMerge(eth1Genesis.Genesis) {
+		genesisBlock := eth1Genesis.Genesis.ToBlock()
+		spec.Config.TERMINAL_BLOCK_HASH = tree.Root(
+			genesisBlock.Hash(),
+		)
+		spec.Config.TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH = common.Timestamp(0)
+	}
 
 	// Generate keys opts for validators
 	shares := config.NodeDefinitions.Shares()

@@ -186,6 +186,7 @@ func BuildExecutionGenesis(
 	ttd *big.Int,
 	genesisTime uint64,
 	consensus ExecutionConsensus,
+	forkConfig *params.ChainConfig,
 ) *ExecutionGenesis {
 	depositContractAddr := common.HexToAddress(
 		"0x4242424242424242424242424242424242424242",
@@ -232,6 +233,11 @@ func BuildExecutionGenesis(
 		NetworkID:      7,
 	}
 
+	// Configure post-merge forks
+	if forkConfig.ShanghaiTime != nil {
+		genesis.Genesis.Config.ShanghaiTime = forkConfig.ShanghaiTime
+	}
+
 	// Configure consensus
 	if err := consensus.Configure(&genesis); err != nil {
 		panic(err)
@@ -262,7 +268,12 @@ func (conf *ExecutionGenesis) ToParams(
 		"HIVE_FORK_ARROWGLACIER":         conf.Genesis.Config.ArrowGlacierBlock.String(),
 		"HIVE_MERGE_BLOCK_ID":            conf.Genesis.Config.MergeNetsplitBlock.String(),
 		"HIVE_TERMINAL_TOTAL_DIFFICULTY": conf.Genesis.Config.TerminalTotalDifficulty.String(),
-		"HIVE_SHANGHAI_TIMESTAMP":        conf.Genesis.Config.ShanghaiTime.String(),
+	}
+	if conf.Genesis.Config.ShanghaiTime != nil {
+		params = params.Set(
+			"HIVE_SHANGHAI_TIMESTAMP",
+			conf.Genesis.Config.ShanghaiTime.String(),
+		)
 	}
 	if conf.Genesis.Config.Clique != nil {
 		params["HIVE_CLIQUE_PERIOD"] = fmt.Sprint(
@@ -270,6 +281,10 @@ func (conf *ExecutionGenesis) ToParams(
 		)
 	}
 	return params
+}
+
+func IsEth1GenesisPostMerge(genesis *core.Genesis) bool {
+	return genesis.Config.TerminalTotalDifficulty.Cmp(genesis.Difficulty) <= 0
 }
 
 func ExecutionBundle(genesis *core.Genesis) (hivesim.StartOption, error) {

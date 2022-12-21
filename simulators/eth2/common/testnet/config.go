@@ -14,7 +14,7 @@ var (
 
 type Config struct {
 	AltairForkEpoch                 *big.Int
-	MergeForkEpoch                  *big.Int
+	BellatrixForkEpoch              *big.Int
 	CapellaForkEpoch                *big.Int
 	ValidatorCount                  *big.Int
 	KeyTranches                     *big.Int
@@ -48,7 +48,7 @@ func (a *Config) Join(b *Config) *Config {
 	c := Config{}
 	// Forks
 	c.AltairForkEpoch = choose(a.AltairForkEpoch, b.AltairForkEpoch)
-	c.MergeForkEpoch = choose(a.MergeForkEpoch, b.MergeForkEpoch)
+	c.BellatrixForkEpoch = choose(a.BellatrixForkEpoch, b.BellatrixForkEpoch)
 	c.CapellaForkEpoch = choose(a.CapellaForkEpoch, b.CapellaForkEpoch)
 
 	// Testnet config
@@ -87,8 +87,10 @@ func (a *Config) Join(b *Config) *Config {
 }
 
 func (c *Config) activeFork() string {
-	if c.MergeForkEpoch != nil && c.MergeForkEpoch.Cmp(Big0) == 0 {
-		return "merge"
+	if c.CapellaForkEpoch != nil && c.CapellaForkEpoch.Cmp(Big0) == 0 {
+		return "capella"
+	} else if c.BellatrixForkEpoch != nil && c.BellatrixForkEpoch.Cmp(Big0) == 0 {
+		return "bellatrix"
 	} else if c.AltairForkEpoch != nil && c.AltairForkEpoch.Cmp(Big0) == 0 {
 		return "altair"
 	} else {

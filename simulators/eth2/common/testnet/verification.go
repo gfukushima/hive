@@ -11,10 +11,7 @@ import (
 	"github.com/ethereum/hive/simulators/eth2/common/clients"
 	"github.com/ethereum/hive/simulators/eth2/common/utils"
 	"github.com/protolambda/eth2api"
-	"github.com/protolambda/zrnt/eth2/beacon/altair"
-	"github.com/protolambda/zrnt/eth2/beacon/bellatrix"
 	"github.com/protolambda/zrnt/eth2/beacon/common"
-	"github.com/protolambda/zrnt/eth2/beacon/phase0"
 	"github.com/protolambda/ztyp/tree"
 )
 
@@ -145,27 +142,28 @@ func (t *Testnet) VerifyExecutionPayloadIsCanonical(
 	if err != nil {
 		return fmt.Errorf("beacon %d: failed to retrieve block: %v", 0, err)
 	}
-	if versionedBlock.Version != "bellatrix" {
-		return nil
+
+	payload, err := versionedBlock.ExecutionPayload()
+	if err != nil {
+		return err
 	}
 
-	payload := versionedBlock.Data.(*bellatrix.SignedBeaconBlock).Message.Body.ExecutionPayload
-
 	for i, ec := range t.VerificationNodes().ExecutionClients().Running() {
-		block, err := ec.BlockByNumber(
+		if block, err := ec.BlockByNumber(
 			parentCtx,
-			big.NewInt(int64(payload.BlockNumber)),
-		)
-		if err != nil {
+			big.NewInt(int64(payload.Number)),
+		); err != nil {
 			return fmt.Errorf("eth1 %d: %s", 0, err)
-		}
-		if block.Hash() != [32]byte(payload.BlockHash) {
-			return fmt.Errorf(
-				"eth1 %d: blocks don't match (got=%s, expected=%s)",
-				i,
-				utils.Shorten(block.Hash().String()),
-				utils.Shorten(payload.BlockHash.String()),
-			)
+		} else {
+			blockHash := block.Hash()
+			if !bytes.Equal(blockHash[:], payload.BlockHash[:]) {
+				return fmt.Errorf(
+					"eth1 %d: blocks don't match (got=%s, expected=%s)",
+					i,
+					utils.Shorten(blockHash.String()),
+					utils.Shorten(payload.BlockHash.String()),
+				)
+			}
 		}
 	}
 	return nil
@@ -178,7 +176,7 @@ func (t *Testnet) VerifyExecutionPayloadHashInclusion(
 	parentCtx context.Context,
 	vs VerificationSlot,
 	hash ethcommon.Hash,
-) (*bellatrix.SignedBeaconBlock, error) {
+) (*clients.VersionedSignedBeaconBlock, error) {
 	for _, bn := range t.VerificationNodes().BeaconClients().Running() {
 		b, err := t.VerifyExecutionPayloadHashInclusionNode(
 			parentCtx,
@@ -198,7 +196,7 @@ func (t *Testnet) VerifyExecutionPayloadHashInclusionNode(
 	vs VerificationSlot,
 	bn *clients.BeaconClient,
 	hash ethcommon.Hash,
-) (*bellatrix.SignedBeaconBlock, error) {
+) (*clients.VersionedSignedBeaconBlock, error) {
 	lastSlot, err := vs.Slot(parentCtx, t, bn)
 	if err != nil {
 		return nil, err
@@ -208,15 +206,13 @@ func (t *Testnet) VerifyExecutionPayloadHashInclusionNode(
 		if err != nil {
 			continue
 		}
-		if versionedBlock.Version != "bellatrix" {
+		if executionPayload, err := versionedBlock.ExecutionPayload(); err != nil {
 			// Block can't contain an executable payload
 			break
+		} else if bytes.Equal(executionPayload.BlockHash[:], hash[:]) {
+			return versionedBlock, nil
 		}
-		block := versionedBlock.Data.(*bellatrix.SignedBeaconBlock)
-		payload := block.Message.Body.ExecutionPayload
-		if bytes.Equal(payload.BlockHash[:], hash[:]) {
-			return block, nil
-		}
+
 	}
 	return nil, nil
 }
@@ -247,23 +243,11 @@ func (t *Testnet) VerifyProposers(
 				err,
 			)
 		}
-		var proposerIndex common.ValidatorIndex
-		switch versionedBlock.Version {
-		case "phase0":
-			block := versionedBlock.Data.(*phase0.SignedBeaconBlock)
-			proposerIndex = block.Message.ProposerIndex
-		case "altair":
-			block := versionedBlock.Data.(*altair.SignedBeaconBlock)
-			proposerIndex = block.Message.ProposerIndex
-		case "bellatrix":
-			block := versionedBlock.Data.(*bellatrix.SignedBeaconBlock)
-			proposerIndex = block.Message.ProposerIndex
-		}
 
 		validator, err := bn.StateValidator(
 			parentCtx,
 			eth2api.StateIdSlot(slot),
-			eth2api.ValidatorIdIndex(proposerIndex),
+			eth2api.ValidatorIdIndex(versionedBlock.ProposerIndex()),
 		)
 		if err != nil {
 			return fmt.Errorf(
@@ -323,33 +307,26 @@ func (t *Testnet) VerifyELBlockLabels(parentCtx context.Context) error {
 			if err != nil {
 				return err
 			}
-			expectedExec := ethcommon.Hash{}
-			switch versionedBlock.Version {
-			case "bellatrix":
-				block := versionedBlock.Data.(*bellatrix.SignedBeaconBlock)
-				expectedExec = ethcommon.BytesToHash(
-					block.Message.Body.ExecutionPayload.BlockHash[:],
-				)
-			}
-
-			// Get the el block and compare
-			h, err := el.HeaderByLabel(parentCtx, label)
-			if err != nil {
-				if expectedExec != (ethcommon.Hash{}) {
-					return err
+			if executionPayload, err := versionedBlock.ExecutionPayload(); err != nil {
+				// Get the el block and compare
+				h, err := el.HeaderByLabel(parentCtx, label)
+				if err != nil {
+					if executionPayload.BlockHash != (ethcommon.Hash{}) {
+						return err
+					}
+				} else {
+					if h.Hash() != executionPayload.BlockHash {
+						return fmt.Errorf(
+							"beacon %d: Execution hash found in checkpoint block "+
+								"(%s) does not match what the el returns: %v != %v",
+							i, label, executionPayload.BlockHash, h.Hash(),
+						)
+					}
+					fmt.Printf(
+						"beacon %d: Execution hash matches beacon "+
+							"checkpoint block (%s) information: %v\n",
+						i, label, h.Hash())
 				}
-			} else {
-				if h.Hash() != expectedExec {
-					return fmt.Errorf(
-						"beacon %d: Execution hash found in checkpoint block "+
-							"(%s) does not match what the el returns: %v != %v",
-						i, label, expectedExec, h.Hash(),
-					)
-				}
-				fmt.Printf(
-					"beacon %d: Execution hash matches beacon "+
-						"checkpoint block (%s) information: %v\n",
-					i, label, h.Hash())
 			}
 
 		}

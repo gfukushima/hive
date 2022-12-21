@@ -5,19 +5,27 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"strings"
 	"time"
 
 	ethcommon "github.com/ethereum/go-ethereum/common"
+	api "github.com/ethereum/go-ethereum/core/beacon"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/hive/hivesim"
 	"github.com/ethereum/hive/simulators/eth2/common/utils"
+	"github.com/holiman/uint256"
 	"github.com/protolambda/eth2api"
 	"github.com/protolambda/eth2api/client/beaconapi"
 	"github.com/protolambda/eth2api/client/debugapi"
 	"github.com/protolambda/eth2api/client/nodeapi"
+	"github.com/protolambda/zrnt/eth2/beacon/altair"
 	"github.com/protolambda/zrnt/eth2/beacon/bellatrix"
+	"github.com/protolambda/zrnt/eth2/beacon/capella"
 	"github.com/protolambda/zrnt/eth2/beacon/common"
+	"github.com/protolambda/zrnt/eth2/beacon/phase0"
+	"github.com/protolambda/ztyp/tree"
 )
 
 const (
@@ -119,10 +127,120 @@ func (bn *BeaconClient) EnodeURL() (string, error) {
 }
 
 // Beacon API wrappers
+type VersionedSignedBeaconBlock struct {
+	*eth2api.VersionedSignedBeaconBlock
+}
+
+func (versionedBlock *VersionedSignedBeaconBlock) ContainsExecutionPayload() bool {
+	return versionedBlock.Version == "bellatrix" ||
+		versionedBlock.Version == "capella"
+}
+
+func (versionedBlock *VersionedSignedBeaconBlock) ExecutionPayload() (api.ExecutableData, error) {
+	var result = api.ExecutableData{}
+	switch v := versionedBlock.Data.(type) {
+	case *bellatrix.SignedBeaconBlock:
+		execPayload := v.Message.Body.ExecutionPayload
+		copy(result.ParentHash[:], execPayload.ParentHash[:])
+		copy(result.FeeRecipient[:], execPayload.FeeRecipient[:])
+		copy(result.StateRoot[:], execPayload.StateRoot[:])
+		copy(result.ReceiptsRoot[:], execPayload.ReceiptsRoot[:])
+		copy(result.LogsBloom[:], execPayload.LogsBloom[:])
+		copy(result.Random[:], execPayload.PrevRandao[:])
+		result.Number = uint64(execPayload.BlockNumber)
+		result.GasLimit = uint64(execPayload.GasLimit)
+		result.GasUsed = uint64(execPayload.GasUsed)
+		result.Timestamp = uint64(execPayload.Timestamp)
+		copy(result.ExtraData[:], execPayload.ExtraData[:])
+		result.BaseFeePerGas = (*uint256.Int)(&execPayload.BaseFeePerGas).ToBig()
+		copy(result.BlockHash[:], execPayload.BlockHash[:])
+		result.Transactions = make([][]byte, 0)
+		for _, t := range execPayload.Transactions {
+			result.Transactions = append(result.Transactions, t)
+		}
+	case *capella.SignedBeaconBlock:
+		execPayload := v.Message.Body.ExecutionPayload
+		copy(result.ParentHash[:], execPayload.ParentHash[:])
+		copy(result.FeeRecipient[:], execPayload.FeeRecipient[:])
+		copy(result.StateRoot[:], execPayload.StateRoot[:])
+		copy(result.ReceiptsRoot[:], execPayload.ReceiptsRoot[:])
+		copy(result.LogsBloom[:], execPayload.LogsBloom[:])
+		copy(result.Random[:], execPayload.PrevRandao[:])
+		result.Number = uint64(execPayload.BlockNumber)
+		result.GasLimit = uint64(execPayload.GasLimit)
+		result.GasUsed = uint64(execPayload.GasUsed)
+		result.Timestamp = uint64(execPayload.Timestamp)
+		copy(result.ExtraData[:], execPayload.ExtraData[:])
+		result.BaseFeePerGas = (*uint256.Int)(&execPayload.BaseFeePerGas).ToBig()
+		copy(result.BlockHash[:], execPayload.BlockHash[:])
+		result.Transactions = make([][]byte, 0)
+		for _, t := range execPayload.Transactions {
+			result.Transactions = append(result.Transactions, t)
+		}
+		result.Withdrawals = make([]*types.Withdrawal, 0)
+		for _, w := range execPayload.Withdrawals {
+			withdrawal := new(types.Withdrawal)
+			withdrawal.Index = uint64(w.Index)
+			withdrawal.Validator = uint64(w.ValidatorIndex)
+			copy(withdrawal.Address[:], w.Address[:])
+			withdrawal.Amount = big.NewInt(int64(w.Amount))
+			withdrawal.Amount.Mul(withdrawal.Amount, big.NewInt(1e9))
+			result.Withdrawals = append(result.Withdrawals, withdrawal)
+		}
+	default:
+		return result, fmt.Errorf(
+			"beacon block version can't contain execution payload",
+		)
+	}
+	return result, nil
+}
+
+func (b *VersionedSignedBeaconBlock) StateRoot() tree.Root {
+	switch v := b.Data.(type) {
+	case *phase0.SignedBeaconBlock:
+		return v.Message.StateRoot
+	case *altair.SignedBeaconBlock:
+		return v.Message.StateRoot
+	case *bellatrix.SignedBeaconBlock:
+		return v.Message.StateRoot
+	case *capella.SignedBeaconBlock:
+		return v.Message.StateRoot
+	}
+	panic("badly formatted beacon block")
+}
+
+func (b *VersionedSignedBeaconBlock) Slot() common.Slot {
+	switch v := b.Data.(type) {
+	case *phase0.SignedBeaconBlock:
+		return v.Message.Slot
+	case *altair.SignedBeaconBlock:
+		return v.Message.Slot
+	case *bellatrix.SignedBeaconBlock:
+		return v.Message.Slot
+	case *capella.SignedBeaconBlock:
+		return v.Message.Slot
+	}
+	panic("badly formatted beacon block")
+}
+
+func (b *VersionedSignedBeaconBlock) ProposerIndex() common.ValidatorIndex {
+	switch v := b.Data.(type) {
+	case *phase0.SignedBeaconBlock:
+		return v.Message.ProposerIndex
+	case *altair.SignedBeaconBlock:
+		return v.Message.ProposerIndex
+	case *bellatrix.SignedBeaconBlock:
+		return v.Message.ProposerIndex
+	case *capella.SignedBeaconBlock:
+		return v.Message.ProposerIndex
+	}
+	panic("badly formatted beacon block")
+}
+
 func (bn *BeaconClient) BlockV2(
 	parentCtx context.Context,
 	blockId eth2api.BlockId,
-) (*eth2api.VersionedSignedBeaconBlock, error) {
+) (*VersionedSignedBeaconBlock, error) {
 	var (
 		versionedBlock = new(eth2api.VersionedSignedBeaconBlock)
 		exists         bool
@@ -134,7 +252,9 @@ func (bn *BeaconClient) BlockV2(
 	if !exists {
 		return nil, fmt.Errorf("endpoint not found on beacon client")
 	}
-	return versionedBlock, err
+	return &VersionedSignedBeaconBlock{
+		VersionedSignedBeaconBlock: versionedBlock,
+	}, err
 }
 
 type BlockV2OptimisticResponse struct {
@@ -258,10 +378,54 @@ func (bn *BeaconClient) BlockFinalityCheckpoints(
 	return finalityCheckpointsResponse, err
 }
 
+type VersionedBeaconStateResponse struct {
+	*eth2api.VersionedBeaconState
+}
+
+func (vbs *VersionedBeaconStateResponse) CurrentEpochParticipation() altair.ParticipationRegistry {
+	switch state := vbs.Data.(type) {
+	case *altair.BeaconState:
+		return state.CurrentEpochParticipation
+	case *bellatrix.BeaconState:
+		return state.CurrentEpochParticipation
+	case *capella.BeaconState:
+		return state.CurrentEpochParticipation
+	}
+	return nil
+}
+
+func (vbs *VersionedBeaconStateResponse) Balances() phase0.Balances {
+	switch state := vbs.Data.(type) {
+	case *phase0.BeaconState:
+		return state.Balances
+	case *altair.BeaconState:
+		return state.Balances
+	case *bellatrix.BeaconState:
+		return state.Balances
+	case *capella.BeaconState:
+		return state.Balances
+	}
+	panic("badly formatted beacon state")
+}
+
+func (vbs *VersionedBeaconStateResponse) Validators() phase0.ValidatorRegistry {
+	switch state := vbs.Data.(type) {
+	case *phase0.BeaconState:
+		return state.Validators
+	case *altair.BeaconState:
+		return state.Validators
+	case *bellatrix.BeaconState:
+		return state.Validators
+	case *capella.BeaconState:
+		return state.Validators
+	}
+	panic("badly formatted beacon state")
+}
+
 func (bn *BeaconClient) BeaconStateV2(
 	parentCtx context.Context,
 	stateId eth2api.StateId,
-) (*eth2api.VersionedBeaconState, error) {
+) (*VersionedBeaconStateResponse, error) {
 	var (
 		versionedBeaconStateResponse = new(eth2api.VersionedBeaconState)
 		exists                       bool
@@ -278,7 +442,27 @@ func (bn *BeaconClient) BeaconStateV2(
 	if !exists {
 		return nil, fmt.Errorf("endpoint not found on beacon client")
 	}
-	return versionedBeaconStateResponse, err
+	return &VersionedBeaconStateResponse{
+		VersionedBeaconState: versionedBeaconStateResponse,
+	}, err
+}
+
+func (bn *BeaconClient) BeaconStateV2ByBlock(
+	parentCtx context.Context,
+	blockId eth2api.BlockId,
+) (*VersionedBeaconStateResponse, error) {
+	var (
+		headInfo *eth2api.BeaconBlockHeaderAndInfo
+		err      error
+	)
+	headInfo, err = bn.BlockHeader(parentCtx, blockId)
+	if err != nil {
+		return nil, err
+	}
+	return bn.BeaconStateV2(
+		parentCtx,
+		eth2api.StateIdRoot(headInfo.Header.Message.StateRoot),
+	)
 }
 
 func (bn *BeaconClient) StateValidatorBalances(
@@ -307,6 +491,12 @@ func (bn *BeaconClient) StateValidatorBalances(
 		return nil, fmt.Errorf("endpoint not found on beacon client")
 	}
 	return stateValidatorBalanceResponse, err
+}
+
+func (bn *BeaconClient) SubmitPoolBLSToExecutionChange(
+	l common.SignedBLSToExecutionChanges,
+) error {
+	return fmt.Errorf("NOT IMPLEMENTED")
 }
 
 type BeaconClients []*BeaconClient
@@ -376,33 +566,24 @@ func (b *BeaconClient) WaitForExecutionPayload(
 				common.Timestamp(time.Now().Unix()),
 				b.genesisTime,
 			)
-			var headInfo eth2api.BeaconBlockHeaderAndInfo
-			if exists, err := beaconapi.BlockHeader(ctx, b.API, eth2api.BlockHead, &headInfo); err != nil {
-				return ethcommon.Hash{}, fmt.Errorf(
-					"WaitForExecutionPayload: failed to poll head: %v",
-					err,
-				)
-			} else if !exists {
-				return ethcommon.Hash{}, fmt.Errorf("WaitForExecutionPayload: failed to poll head: !exists")
+			var (
+				headInfo  *eth2api.BeaconBlockHeaderAndInfo
+				err       error
+				execution ethcommon.Hash
+			)
+			if headInfo, err = b.BlockHeader(ctx, eth2api.BlockHead); err != nil {
+				return ethcommon.Hash{}, err
 			}
 			if !headInfo.Canonical {
 				continue
 			}
 
-			var versionedBlock eth2api.VersionedSignedBeaconBlock
-			if exists, err := beaconapi.BlockV2(ctx, b.API, eth2api.BlockIdRoot(headInfo.Root), &versionedBlock); err != nil {
-				// some clients fail to return the head because the client recently re-org'd,
-				// keep checking anyway...
+			if versionedBlock, err := b.BlockV2(ctx, eth2api.BlockIdRoot(headInfo.Root)); err != nil {
 				continue
-			} else if !exists {
-				return ethcommon.Hash{}, fmt.Errorf("WaitForExecutionPayload: block not found")
-			}
-			var execution ethcommon.Hash
-			if versionedBlock.Version == "bellatrix" {
-				block := versionedBlock.Data.(*bellatrix.SignedBeaconBlock)
+			} else if executionPayload, err := versionedBlock.ExecutionPayload(); err == nil {
 				copy(
 					execution[:],
-					block.Message.Body.ExecutionPayload.BlockHash[:],
+					executionPayload.BlockHash[:],
 				)
 			}
 			zero := ethcommon.Hash{}
@@ -463,7 +644,7 @@ func (b *BeaconClient) WaitForOptimisticState(
 
 func (bn *BeaconClient) GetLatestExecutionBeaconBlock(
 	parentCtx context.Context,
-) (*bellatrix.SignedBeaconBlock, error) {
+) (*VersionedSignedBeaconBlock, error) {
 	headInfo, err := bn.BlockHeader(parentCtx, eth2api.BlockHead)
 	if err != nil {
 		return nil, fmt.Errorf("failed to poll head: %v", err)
@@ -473,13 +654,11 @@ func (bn *BeaconClient) GetLatestExecutionBeaconBlock(
 		if err != nil {
 			return nil, fmt.Errorf("failed to retrieve block: %v", err)
 		}
-		if versionedBlock.Version != "bellatrix" {
-			return nil, nil
-		}
-		block := versionedBlock.Data.(*bellatrix.SignedBeaconBlock)
-		payload := block.Message.Body.ExecutionPayload
-		if ethcommon.BytesToHash(payload.BlockHash[:]) != (ethcommon.Hash{}) {
-			return block, nil
+		if executionPayload, err := versionedBlock.ExecutionPayload(); err == nil {
+			emptyRoot := tree.Root{}
+			if !bytes.Equal(executionPayload.BlockHash[:], emptyRoot[:]) {
+				return versionedBlock, nil
+			}
 		}
 	}
 	return nil, nil
@@ -487,7 +666,7 @@ func (bn *BeaconClient) GetLatestExecutionBeaconBlock(
 
 func (bn *BeaconClient) GetFirstExecutionBeaconBlock(
 	parentCtx context.Context,
-) (*bellatrix.SignedBeaconBlock, error) {
+) (*VersionedSignedBeaconBlock, error) {
 	lastSlot := bn.spec.TimeToSlot(
 		common.Timestamp(time.Now().Unix()),
 		bn.genesisTime,
@@ -497,13 +676,11 @@ func (bn *BeaconClient) GetFirstExecutionBeaconBlock(
 		if err != nil {
 			continue
 		}
-		if versionedBlock.Version != "bellatrix" {
-			continue
-		}
-		block := versionedBlock.Data.(*bellatrix.SignedBeaconBlock)
-		payload := block.Message.Body.ExecutionPayload
-		if ethcommon.BytesToHash(payload.BlockHash[:]) != (ethcommon.Hash{}) {
-			return block, nil
+		if executionPayload, err := versionedBlock.ExecutionPayload(); err == nil {
+			emptyRoot := tree.Root{}
+			if !bytes.Equal(executionPayload.BlockHash[:], emptyRoot[:]) {
+				return versionedBlock, nil
+			}
 		}
 	}
 	return nil, nil
@@ -512,7 +689,7 @@ func (bn *BeaconClient) GetFirstExecutionBeaconBlock(
 func (bn *BeaconClient) GetBeaconBlockByExecutionHash(
 	parentCtx context.Context,
 	hash ethcommon.Hash,
-) (*bellatrix.SignedBeaconBlock, error) {
+) (*VersionedSignedBeaconBlock, error) {
 	headInfo, err := bn.BlockHeader(parentCtx, eth2api.BlockHead)
 	if err != nil {
 		return nil, fmt.Errorf("failed to poll head: %v", err)
@@ -522,14 +699,10 @@ func (bn *BeaconClient) GetBeaconBlockByExecutionHash(
 		if err != nil {
 			continue
 		}
-		if versionedBlock.Version != "bellatrix" {
-			// Block can't contain an executable payload, and we are not going to find it going backwards, so return.
-			return nil, nil
-		}
-		block := versionedBlock.Data.(*bellatrix.SignedBeaconBlock)
-		payload := block.Message.Body.ExecutionPayload
-		if bytes.Equal(payload.BlockHash[:], hash[:]) {
-			return block, nil
+		if executionPayload, err := versionedBlock.ExecutionPayload(); err == nil {
+			if !bytes.Equal(executionPayload.BlockHash[:], hash[:]) {
+				return versionedBlock, nil
+			}
 		}
 	}
 	return nil, nil
@@ -538,7 +711,7 @@ func (bn *BeaconClient) GetBeaconBlockByExecutionHash(
 func (b BeaconClients) GetBeaconBlockByExecutionHash(
 	parentCtx context.Context,
 	hash ethcommon.Hash,
-) (*bellatrix.SignedBeaconBlock, error) {
+) (*VersionedSignedBeaconBlock, error) {
 	for _, bn := range b {
 		block, err := bn.GetBeaconBlockByExecutionHash(parentCtx, hash)
 		if err != nil || block != nil {
@@ -546,4 +719,51 @@ func (b BeaconClients) GetBeaconBlockByExecutionHash(
 		}
 	}
 	return nil, nil
+}
+
+func (runningBeacons BeaconClients) PrintStatus(
+	ctx context.Context,
+	l utils.Logging,
+) {
+	for i, b := range runningBeacons {
+		var (
+			slot      common.Slot
+			head      string
+			justified string
+			finalized string
+			execution = "0x0000..0000"
+		)
+
+		if headInfo, err := b.BlockHeader(ctx, eth2api.BlockHead); err == nil {
+			slot = headInfo.Header.Message.Slot
+			head = utils.Shorten(headInfo.Root.String())
+		}
+		checkpoints, err := b.BlockFinalityCheckpoints(
+			ctx,
+			eth2api.BlockHead,
+		)
+		if err == nil {
+			justified = utils.Shorten(
+				checkpoints.CurrentJustified.String(),
+			)
+			finalized = utils.Shorten(checkpoints.Finalized.String())
+		}
+		if versionedBlock, err := b.BlockV2(ctx, eth2api.BlockHead); err == nil {
+			if executionPayload, err := versionedBlock.ExecutionPayload(); err == nil {
+				execution = utils.Shorten(
+					executionPayload.BlockHash.String(),
+				)
+			}
+		}
+
+		l.Logf(
+			"beacon %d: slot=%d, head=%s, exec_payload=%s, justified=%s, finalized=%s",
+			i,
+			slot,
+			head,
+			execution,
+			justified,
+			finalized,
+		)
+	}
 }

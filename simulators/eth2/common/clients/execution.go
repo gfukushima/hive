@@ -399,6 +399,16 @@ func (ec *ExecutionClient) BlockByNumber(
 	return ec.eth.BlockByNumber(ctx, n)
 }
 
+func (ec *ExecutionClient) BalanceAt(
+	parentCtx context.Context,
+	account common.Address,
+	n *big.Int,
+) (*big.Int, error) {
+	ctx, cancel := utils.ContextTimeoutRPC(parentCtx)
+	defer cancel()
+	return ec.eth.BalanceAt(ctx, account, n)
+}
+
 type ExecutionClients []*ExecutionClient
 
 // Return subset of clients that are currently running

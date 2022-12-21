@@ -17,6 +17,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/protolambda/go-keystorev4"
 	"github.com/protolambda/zrnt/eth2/beacon/common"
+	"github.com/protolambda/ztyp/tree"
 	"github.com/tyler-smith/go-bip39"
 	util "github.com/wealdtech/go-eth2-util"
 )
@@ -49,6 +50,37 @@ type KeyDetails struct {
 	WithdrawalPubkey [48]byte
 	// Withdrawal Execution Address
 	WithdrawalExecAddress [20]byte
+	// Extra initial balance
+	ExtraInitialBalance common.Gwei
+}
+
+func (kd *KeyDetails) SignBLSToExecutionChange(
+	domain common.BLSDomain,
+	validatorIndex common.ValidatorIndex,
+	executionAddress common.Eth1Address,
+) (*common.SignedBLSToExecutionChange, error) {
+	if len(executionAddress) != 20 {
+		return nil, fmt.Errorf("invalid length for execution address")
+	}
+	kdPubKey := common.BLSPubkey{}
+	copy(kdPubKey[:], kd.WithdrawalPubkey[:])
+	blsToExecChange := common.BLSToExecutionChange{
+		ValidatorIndex:     validatorIndex,
+		FromBLSPubKey:      kdPubKey,
+		ToExecutionAddress: executionAddress,
+	}
+	sigRoot := common.ComputeSigningRoot(
+		blsToExecChange.HashTreeRoot(tree.GetHashFn()),
+		domain,
+	)
+
+	sk := new(blsu.SecretKey)
+	sk.Deserialize(&kd.WithdrawalSecretKey)
+	signature := blsu.Sign(sk, sigRoot[:]).Serialize()
+	return &common.SignedBLSToExecutionChange{
+		BLSToExecutionChange: blsToExecChange,
+		Signature:            common.BLSSignature(signature),
+	}, nil
 }
 
 func (kd *KeyDetails) WithdrawalCredentials() (out common.Root) {

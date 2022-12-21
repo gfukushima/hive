@@ -9,7 +9,6 @@ import (
 	"github.com/ethereum/hive/simulators/eth2/common/clients"
 	"github.com/ethereum/hive/simulators/eth2/common/utils"
 	"github.com/protolambda/eth2api"
-	"github.com/protolambda/zrnt/eth2/beacon/bellatrix"
 	"github.com/protolambda/zrnt/eth2/beacon/common"
 	"github.com/protolambda/ztyp/tree"
 )
@@ -46,12 +45,8 @@ func PrintAllBeaconBlocks(
 		)
 
 		if versionedBlock, err := b.BlockV2(parentCtx, eth2api.BlockIdRoot(root)); err == nil {
-			switch versionedBlock.Version {
-			case "bellatrix":
-				block := versionedBlock.Data.(*bellatrix.SignedBeaconBlock)
-				execution = utils.Shorten(
-					block.Message.Body.ExecutionPayload.BlockHash.String(),
-				)
+			if executionPayload, err := versionedBlock.ExecutionPayload(); err == nil {
+				execution = utils.Shorten(executionPayload.BlockHash.Hex())
 			}
 		}
 
@@ -195,12 +190,8 @@ func PrintAllTestnetBeaconBlocks(
 			)
 
 			if versionedBlock, err := beaconNode.BlockV2(parentCtx, eth2api.BlockIdRoot(root)); err == nil {
-				switch versionedBlock.Version {
-				case "bellatrix":
-					block := versionedBlock.Data.(*bellatrix.SignedBeaconBlock)
-					execution = ethcommon.BytesToHash(
-						block.Message.Body.ExecutionPayload.BlockHash[:],
-					)
+				if executionPayload, err := versionedBlock.ExecutionPayload(); err == nil {
+					execution = executionPayload.BlockHash
 					l.Logf(
 						"Node %d: Execution payload: hash=%s",
 						nodeId,

@@ -8,6 +8,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/protolambda/zrnt/eth2/beacon/altair"
 	"github.com/protolambda/zrnt/eth2/beacon/bellatrix"
+	"github.com/protolambda/zrnt/eth2/beacon/capella"
 	"github.com/protolambda/zrnt/eth2/beacon/common"
 	"github.com/protolambda/zrnt/eth2/beacon/phase0"
 	"github.com/protolambda/zrnt/eth2/configs"
@@ -68,7 +69,7 @@ func createValidators(
 		validators = append(validators, phase0.KickstartValidatorData{
 			Pubkey:                key.ValidatorPubkey,
 			WithdrawalCredentials: key.WithdrawalCredentials(),
-			Balance:               spec.MAX_EFFECTIVE_BALANCE,
+			Balance:               spec.MAX_EFFECTIVE_BALANCE + key.ExtraInitialBalance,
 		})
 	}
 	return validators
@@ -102,20 +103,33 @@ func BuildBeaconState(
 	var state common.BeaconState
 	var forkVersion common.Version
 	var emptyBodyRoot common.Root
-	if spec.BELLATRIX_FORK_EPOCH == 0 {
-		state = bellatrix.NewBeaconStateView(spec)
+	if spec.CAPELLA_FORK_EPOCH == 0 {
+		stateView := capella.NewBeaconStateView(spec)
+		forkVersion = spec.CAPELLA_FORK_VERSION
+		emptyBodyRoot = capella.BeaconBlockBodyType(configs.Mainnet).
+			New().
+			HashTreeRoot(hFn)
+		// TODO: Check if we need to add execution payload to the state
+		state = stateView
+	} else if spec.BELLATRIX_FORK_EPOCH == 0 {
+		stateView := bellatrix.NewBeaconStateView(spec)
 		forkVersion = spec.BELLATRIX_FORK_VERSION
 		emptyBodyRoot = bellatrix.BeaconBlockBodyType(configs.Mainnet).
 			New().
 			HashTreeRoot(hFn)
+		state = stateView
 	} else if spec.ALTAIR_FORK_EPOCH == 0 {
 		state = bellatrix.NewBeaconStateView(spec)
 		forkVersion = spec.ALTAIR_FORK_VERSION
-		emptyBodyRoot = altair.BeaconBlockBodyType(configs.Mainnet).New().HashTreeRoot(hFn)
+		emptyBodyRoot = altair.BeaconBlockBodyType(configs.Mainnet).
+			New().
+			HashTreeRoot(hFn)
 	} else {
 		state = phase0.NewBeaconStateView(spec)
 		forkVersion = spec.GENESIS_FORK_VERSION
-		emptyBodyRoot = phase0.BeaconBlockBodyType(configs.Mainnet).New().HashTreeRoot(hFn)
+		emptyBodyRoot = phase0.BeaconBlockBodyType(configs.Mainnet).
+			New().
+			HashTreeRoot(hFn)
 	}
 
 	if err := state.SetGenesisTime(eth2GenesisTime); err != nil {

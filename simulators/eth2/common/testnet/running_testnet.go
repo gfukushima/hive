@@ -12,11 +12,9 @@ import (
 
 	"github.com/protolambda/eth2api"
 	"github.com/protolambda/zrnt/eth2/beacon/altair"
-	"github.com/protolambda/zrnt/eth2/beacon/bellatrix"
 	"github.com/protolambda/zrnt/eth2/beacon/common"
 	"github.com/protolambda/zrnt/eth2/beacon/phase0"
 	"github.com/protolambda/zrnt/eth2/util/math"
-	"github.com/protolambda/ztyp/tree"
 
 	"github.com/ethereum/hive/hivesim"
 	"github.com/ethereum/hive/simulators/eth2/common/clients"
@@ -101,6 +99,10 @@ func (t *Testnet) GenesisTime() common.Timestamp {
 
 func (t *Testnet) GenesisTimeUnix() time.Time {
 	return time.Unix(int64(t.genesisTime), 0)
+}
+
+func (t *Testnet) GenesisValidatorsRoot() common.Root {
+	return t.genesisValidatorsRoot
 }
 
 func StartTestnet(
@@ -214,6 +216,15 @@ func (t *Testnet) ValidatorClientIndex(pk [48]byte) (int, error) {
 	return 0, fmt.Errorf("key not found in any validator client")
 }
 
+// Wait until the beacon chain genesis happens.
+func (t *Testnet) WaitForGenesis(ctx context.Context) {
+	genesis := t.GenesisTimeUnix()
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Until(genesis)):
+	}
+}
+
 // WaitForFinality blocks until a beacon client reaches finality,
 // or timeoutSlots have passed, whichever happens first.
 func (t *Testnet) WaitForFinality(ctx context.Context) (
@@ -261,8 +272,8 @@ func (t *Testnet) WaitForFinality(ctx context.Context) (
 						head      string
 						justified string
 						finalized string
-						execution string
 						health    float64
+						execution = "0x0000..0000"
 					)
 
 					headInfo, err := b.BlockHeader(ctx, eth2api.BlockHead)
@@ -294,15 +305,9 @@ func (t *Testnet) WaitForFinality(ctx context.Context) (
 						ch <- res{err: fmt.Errorf("beacon %d: failed to retrieve block: %v", i, err)}
 						return
 					}
-					switch versionedBlock.Version {
-					case "phase0":
-						execution = "0x0000..0000"
-					case "altair":
-						execution = "0x0000..0000"
-					case "bellatrix":
-						block := versionedBlock.Data.(*bellatrix.SignedBeaconBlock)
+					if executionPayload, err := versionedBlock.ExecutionPayload(); err == nil {
 						execution = utils.Shorten(
-							block.Message.Body.ExecutionPayload.BlockHash.String(),
+							executionPayload.BlockHash.String(),
 						)
 					}
 
@@ -416,31 +421,27 @@ func (t *Testnet) WaitForExecutionFinality(
 					finalized = utils.Shorten(checkpoints.Finalized.String())
 
 					var (
-						execution    tree.Root
+						execution    ethcommon.Hash
 						executionStr = "0x0000..0000"
 					)
 
 					if (checkpoints.Finalized != common.Checkpoint{}) {
-						versionedBlock, err := b.BlockV2(
+						if versionedBlock, err := b.BlockV2(
 							ctx,
 							eth2api.BlockIdRoot(checkpoints.Finalized.Root),
-						)
-						if err != nil {
+						); err != nil {
 							ch <- res{err: fmt.Errorf("beacon %d: failed to retrieve block: %v", i, err)}
 							return
+						} else if exeuctionPayload, err := versionedBlock.ExecutionPayload(); err == nil {
+							execution = exeuctionPayload.BlockHash
+							executionStr = utils.Shorten(execution.Hex())
 						}
 
-						switch versionedBlock.Version {
-						case "bellatrix":
-							block := versionedBlock.Data.(*bellatrix.SignedBeaconBlock)
-							execution = block.Message.Body.ExecutionPayload.BlockHash
-							executionStr = utils.Shorten(execution.String())
-						}
 					}
 
 					ch <- res{i, fmt.Sprintf("beacon %d: slot=%d, head=%s, finalized_exec_payload=%s, justified=%s, finalized=%s", i, slot, head, executionStr, justified, finalized), nil}
-
-					if (execution != tree.Root{}) {
+					emptyHash := ethcommon.Hash{}
+					if !bytes.Equal(execution[:], emptyHash[:]) {
 						done <- checkpoints.Finalized
 					}
 				}(
@@ -625,10 +626,9 @@ func (t *Testnet) WaitForExecutionPayload(
 					defer wg.Done()
 
 					var (
-						slot      common.Slot
-						head      string
-						execution ethcommon.Hash
-						health    float64
+						slot   common.Slot
+						head   string
+						health float64
 					)
 
 					headInfo, err := b.BlockHeader(ctx, eth2api.BlockHead)
@@ -639,30 +639,17 @@ func (t *Testnet) WaitForExecutionPayload(
 					slot = headInfo.Header.Message.Slot
 					head = utils.Shorten(headInfo.Root.String())
 
-					versionedBlock, err := b.BlockV2(
+					if versionedBlock, err := b.BlockV2(
 						ctx,
 						eth2api.BlockIdRoot(headInfo.Root),
-					)
-					if err != nil {
+					); err != nil {
 						ch <- res{err: fmt.Errorf("beacon %d: failed to retrieve block: %v", i, err)}
 						return
-					}
-					switch versionedBlock.Version {
-					case "phase0":
-						execution = ethcommon.Hash{}
-					case "altair":
-						execution = ethcommon.Hash{}
-					case "bellatrix":
-						block := versionedBlock.Data.(*bellatrix.SignedBeaconBlock)
-						zero := ethcommon.Hash{}
-
-						copy(
-							execution[:],
-							block.Message.Body.ExecutionPayload.BlockHash[:],
-						)
-
-						if !bytes.Equal(execution[:], zero[:]) {
-							done <- execution
+					} else if executionPayload, err := versionedBlock.ExecutionPayload(); err == nil {
+						emptyHash := ethcommon.Hash{}
+						if !bytes.Equal(executionPayload.BlockHash[:], emptyHash[:]) {
+							ch <- res{i, fmt.Sprintf("beacon %d: slot=%d, head=%s, health=%.2f, exec_payload=%s", i, slot, head, health, utils.Shorten(executionPayload.BlockHash.Hex())), nil}
+							done <- executionPayload.BlockHash
 						}
 					}
 
@@ -673,7 +660,7 @@ func (t *Testnet) WaitForExecutionPayload(
 						fmt.Printf("WARN: beacon %d: %s\n", i, err)
 					}
 
-					ch <- res{i, fmt.Sprintf("beacon %d: slot=%d, head=%s, health=%.2f, exec_payload=%s", i, slot, head, health, utils.Shorten(execution.Hex())), nil}
+					ch <- res{i, fmt.Sprintf("beacon %d: slot=%d, head=%s, health=%.2f, exec_payload=0x000..000", i, slot, head, health), nil}
 
 				}(
 					ctx,
@@ -714,8 +701,14 @@ func GetHealth(
 	if err != nil {
 		return 0, fmt.Errorf("failed to retrieve state: %v", err)
 	}
-	switch stateInfo.Version {
-	case "phase0":
+	currentEpochParticipation := stateInfo.CurrentEpochParticipation()
+	if currentEpochParticipation != nil {
+		// Altair and after
+		health = calcHealth(currentEpochParticipation)
+	} else {
+		if stateInfo.Version != "phase0" {
+			return 0, fmt.Errorf("calculate participation")
+		}
 		state := stateInfo.Data.(*phase0.BeaconState)
 		epoch := spec.SlotToEpoch(slot)
 		validatorIds := make([]eth2api.ValidatorId, 0, len(state.Validators))
@@ -761,12 +754,6 @@ func GetHealth(
 			)
 		}
 		health = legacyCalcHealth(spec, balancesBefore, balancesAfter)
-	case "altair":
-		state := stateInfo.Data.(*altair.BeaconState)
-		health = calcHealth(state.CurrentEpochParticipation)
-	case "bellatrix":
-		state := stateInfo.Data.(*bellatrix.BeaconState)
-		health = calcHealth(state.CurrentEpochParticipation)
 	}
 	return health, nil
 }
