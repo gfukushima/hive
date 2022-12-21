@@ -8,6 +8,8 @@ use (
 	./simulators/eth2/engine
 	./simulators/eth2/testnet
 	./simulators/eth2/withdrawals
+	./simulators/eth2/eth2api
+	./simulators/eth2/zrnt
 	./simulators/ethereum/consensus
 	./simulators/ethereum/engine
 	./simulators/ethereum/graphql
