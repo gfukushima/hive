@@ -19,7 +19,7 @@ var (
 func Phase0Testnet(t *hivesim.T, env *tn.Environment, n clients.NodeDefinition) {
 	config := tn.Config{
 		AltairForkEpoch:         big.NewInt(10),
-		MergeForkEpoch:          big.NewInt(20),
+		BellatrixForkEpoch:      big.NewInt(20),
 		ValidatorCount:          VALIDATOR_COUNT,
 		SlotTime:                SLOT_TIME,
 		TerminalTotalDifficulty: TERMINAL_TOTAL_DIFFICULTY,
@@ -51,7 +51,7 @@ func Phase0Testnet(t *hivesim.T, env *tn.Environment, n clients.NodeDefinition) 
 func TransitionTestnet(t *hivesim.T, env *tn.Environment, n clients.NodeDefinition) {
 	config := tn.Config{
 		AltairForkEpoch:         big.NewInt(0),
-		MergeForkEpoch:          big.NewInt(0),
+		BellatrixForkEpoch:      big.NewInt(0),
 		ValidatorCount:          VALIDATOR_COUNT,
 		SlotTime:                SLOT_TIME,
 		TerminalTotalDifficulty: TERMINAL_TOTAL_DIFFICULTY,
