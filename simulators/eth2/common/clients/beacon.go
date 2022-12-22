@@ -494,9 +494,12 @@ func (bn *BeaconClient) StateValidatorBalances(
 }
 
 func (bn *BeaconClient) SubmitPoolBLSToExecutionChange(
+	parentCtx context.Context,
 	l common.SignedBLSToExecutionChanges,
 ) error {
-	return fmt.Errorf("NOT IMPLEMENTED")
+	ctx, cancel := utils.ContextTimeoutRPC(parentCtx)
+	defer cancel()
+	return beaconapi.SubmitBLSToExecutionChanges(ctx, bn.API, l)
 }
 
 type BeaconClients []*BeaconClient
