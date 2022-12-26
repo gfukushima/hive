@@ -17,7 +17,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/protolambda/go-keystorev4"
 	"github.com/protolambda/zrnt/eth2/beacon/common"
-	"github.com/protolambda/ztyp/tree"
 	"github.com/tyler-smith/go-bip39"
 	util "github.com/wealdtech/go-eth2-util"
 )
@@ -52,35 +51,6 @@ type KeyDetails struct {
 	WithdrawalExecAddress [20]byte
 	// Extra initial balance
 	ExtraInitialBalance common.Gwei
-}
-
-func (kd *KeyDetails) SignBLSToExecutionChange(
-	domain common.BLSDomain,
-	validatorIndex common.ValidatorIndex,
-	executionAddress common.Eth1Address,
-) (*common.SignedBLSToExecutionChange, error) {
-	if len(executionAddress) != 20 {
-		return nil, fmt.Errorf("invalid length for execution address")
-	}
-	kdPubKey := common.BLSPubkey{}
-	copy(kdPubKey[:], kd.WithdrawalPubkey[:])
-	blsToExecChange := common.BLSToExecutionChange{
-		ValidatorIndex:     validatorIndex,
-		FromBLSPubKey:      kdPubKey,
-		ToExecutionAddress: executionAddress,
-	}
-	sigRoot := common.ComputeSigningRoot(
-		blsToExecChange.HashTreeRoot(tree.GetHashFn()),
-		domain,
-	)
-
-	sk := new(blsu.SecretKey)
-	sk.Deserialize(&kd.WithdrawalSecretKey)
-	signature := blsu.Sign(sk, sigRoot[:]).Serialize()
-	return &common.SignedBLSToExecutionChange{
-		BLSToExecutionChange: blsToExecChange,
-		Signature:            common.BLSSignature(signature),
-	}, nil
 }
 
 func (kd *KeyDetails) WithdrawalCredentials() (out common.Root) {
@@ -321,21 +291,26 @@ func (shares Shares) ValidatorSplits(validatorTotalCount uint64) []uint64 {
 	return validators
 }
 
-func KeyTranches(keys []*KeyDetails, shares Shares) [][]*KeyDetails {
-	tranches := make([][]*KeyDetails, 0, len(shares))
+func KeyTranches(
+	keys []*KeyDetails,
+	shares Shares,
+) []map[common.ValidatorIndex]*KeyDetails {
+	tranches := make([]map[common.ValidatorIndex]*KeyDetails, 0, len(shares))
 	i := uint64(0)
 	for _, c := range shares.ValidatorSplits(uint64(len(keys))) {
-		if c > 0 {
-			tranches = append(tranches, keys[i:i+c])
-		} else {
-			tranches = append(tranches, make([]*KeyDetails, 0))
+		tranche := make(map[common.ValidatorIndex]*KeyDetails)
+		for j := i; j < (i + c); j++ {
+			tranche[common.ValidatorIndex(j)] = keys[i+j]
 		}
+		tranches = append(tranches, tranche)
 		i += c
 	}
 	return tranches
 }
 
-func KeysBundle(keys []*KeyDetails) hivesim.StartOption {
+func KeysBundle(
+	keys map[common.ValidatorIndex]*KeyDetails,
+) hivesim.StartOption {
 	opts := make([]hivesim.StartOption, 0, len(keys)*2)
 	for _, k := range keys {
 		p := fmt.Sprintf(

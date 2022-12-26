@@ -55,7 +55,7 @@ type PreparedTestnet struct {
 	beaconOpts    hivesim.StartOption
 
 	// A tranche is a group of validator keys to run on 1 node
-	keyTranches [][]*cl.KeyDetails
+	keyTranches []map[common.ValidatorIndex]*cl.KeyDetails
 }
 
 // Prepares the fork timestamps of post-merge forks based on the
@@ -457,6 +457,7 @@ func (p *PreparedTestnet) prepareBeaconNode(
 		testnet.genesisTime,
 		testnet.spec,
 		beaconIndex,
+		testnet.genesisValidatorsRoot,
 	)
 }
 
@@ -483,7 +484,7 @@ func (p *PreparedTestnet) prepareValidatorClient(
 	}
 	// This method will return the options used to run the client.
 	// Requires the beacon client object to which to connect.
-	optionsGenerator := func(validatorKeys []*cl.KeyDetails) ([]hivesim.StartOption, error) {
+	optionsGenerator := func(validatorKeys map[common.ValidatorIndex]*cl.KeyDetails) ([]hivesim.StartOption, error) {
 		if !bn.IsRunning() {
 			return nil, fmt.Errorf(
 				"attempted to start a validator when the beacon node is not running",

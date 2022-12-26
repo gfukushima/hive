@@ -1,12 +1,15 @@
 package clients
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/hive/hivesim"
 	cg "github.com/ethereum/hive/simulators/eth2/common/chain_generators"
+	"github.com/protolambda/zrnt/eth2/beacon/common"
+	"github.com/protolambda/zrnt/eth2/beacon/phase0"
 )
 
 // Describe a node setup, which consists of:
@@ -72,86 +75,173 @@ type Node struct {
 }
 
 // Starts all clients included in the bundle
-func (cb *Node) Start(extraOptions ...hivesim.StartOption) error {
-	cb.T.Logf("Starting validator client bundle %d", cb.Index)
-	if cb.ExecutionClient != nil {
-		if err := cb.ExecutionClient.Start(extraOptions...); err != nil {
+func (n *Node) Start(extraOptions ...hivesim.StartOption) error {
+	n.T.Logf("Starting validator client bundle %d", n.Index)
+	if n.ExecutionClient != nil {
+		if err := n.ExecutionClient.Start(extraOptions...); err != nil {
 			return err
 		}
 	} else {
-		cb.T.Logf("No execution client started")
+		n.T.Logf("No execution client started")
 	}
-	if cb.BeaconClient != nil {
-		if err := cb.BeaconClient.Start(extraOptions...); err != nil {
+	if n.BeaconClient != nil {
+		if err := n.BeaconClient.Start(extraOptions...); err != nil {
 			return err
 		}
 	} else {
-		cb.T.Logf("No beacon client started")
+		n.T.Logf("No beacon client started")
 	}
-	if cb.ValidatorClient != nil {
-		if err := cb.ValidatorClient.Start(extraOptions...); err != nil {
+	if n.ValidatorClient != nil {
+		if err := n.ValidatorClient.Start(extraOptions...); err != nil {
 			return err
 		}
 	} else {
-		cb.T.Logf("No validator client started")
+		n.T.Logf("No validator client started")
 	}
 	return nil
 }
 
-func (cb *Node) Shutdown() error {
-	if err := cb.ExecutionClient.Shutdown(); err != nil {
+func (n *Node) Shutdown() error {
+	if err := n.ExecutionClient.Shutdown(); err != nil {
 		return err
 	}
-	if err := cb.BeaconClient.Shutdown(); err != nil {
+	if err := n.BeaconClient.Shutdown(); err != nil {
 		return err
 	}
-	if err := cb.ValidatorClient.Shutdown(); err != nil {
+	if err := n.ValidatorClient.Shutdown(); err != nil {
 		return err
 	}
 	return nil
 }
 
+// Validator operations
+func (n *Node) SignBLSToExecutionChange(
+	ctx context.Context,
+	validatorIndex common.ValidatorIndex,
+	executionAddress common.Eth1Address,
+) (*common.SignedBLSToExecutionChange, error) {
+	vc, bn := n.ValidatorClient, n.BeaconClient
+	if !vc.ContainsValidatorIndex(validatorIndex) {
+		return nil, fmt.Errorf(
+			"validator does not contain specified validator index %d",
+			validatorIndex,
+		)
+	}
+	if domain, err := bn.ComputeDomain(
+		ctx,
+		common.DOMAIN_BLS_TO_EXECUTION_CHANGE,
+		&bn.spec.CAPELLA_FORK_VERSION,
+	); err != nil {
+		return nil, err
+	} else {
+		return vc.SignBLSToExecutionChange(domain, validatorIndex, executionAddress)
+	}
+}
+
+func (n *Node) SignSubmitBLSToExecutionChanges(
+	ctx context.Context,
+	epoch common.Epoch,
+	validatorIndexes []common.ValidatorIndex,
+	executionAddresses []common.Eth1Address,
+) error {
+	if len(validatorIndexes) != len(executionAddresses) {
+		return fmt.Errorf(
+			"incorrect number of validator indexes/execution addresses",
+		)
+	}
+	l := make(common.SignedBLSToExecutionChanges, 0)
+	for i := 0; i < len(validatorIndexes); i++ {
+		blsToExecChange, err := n.SignBLSToExecutionChange(
+			ctx,
+			validatorIndexes[i],
+			executionAddresses[i],
+		)
+		if err != nil {
+			return err
+		}
+		l = append(l, *blsToExecChange)
+	}
+
+	return n.BeaconClient.SubmitPoolBLSToExecutionChange(ctx, l)
+}
+
+func (n *Node) SignVoluntaryExit(
+	ctx context.Context,
+	epoch common.Epoch,
+	validatorIndex common.ValidatorIndex,
+) (*phase0.SignedVoluntaryExit, error) {
+	vc, bn := n.ValidatorClient, n.BeaconClient
+	if !vc.ContainsValidatorIndex(validatorIndex) {
+		return nil, fmt.Errorf(
+			"validator does not contain specified validator index %d",
+			validatorIndex,
+		)
+	}
+	if domain, err := bn.ComputeDomain(
+		ctx,
+		common.DOMAIN_VOLUNTARY_EXIT,
+		nil,
+	); err != nil {
+		return nil, err
+	} else {
+		return vc.SignVoluntaryExit(domain, epoch, validatorIndex)
+	}
+}
+
+func (n *Node) SignSubmitVoluntaryExit(
+	ctx context.Context,
+	epoch common.Epoch,
+	validatorIndex common.ValidatorIndex,
+) error {
+	exit, err := n.SignVoluntaryExit(ctx, epoch, validatorIndex)
+	if err != nil {
+		return err
+	}
+	return n.BeaconClient.SubmitVoluntaryExit(ctx, exit)
+}
+
+// Node cluster operations
 type Nodes []*Node
 
 // Return all execution clients, even the ones not currently running
-func (cbs Nodes) ExecutionClients() ExecutionClients {
+func (all Nodes) ExecutionClients() ExecutionClients {
 	en := make(ExecutionClients, 0)
-	for _, cb := range cbs {
-		if cb.ExecutionClient != nil {
-			en = append(en, cb.ExecutionClient)
+	for _, n := range all {
+		if n.ExecutionClient != nil {
+			en = append(en, n.ExecutionClient)
 		}
 	}
 	return en
 }
 
 // Return all proxy pointers, even the ones not currently running
-func (cbs Nodes) Proxies() Proxies {
+func (all Nodes) Proxies() Proxies {
 	ps := make(Proxies, 0)
-	for _, cb := range cbs {
-		if cb.ExecutionClient != nil {
-			ps = append(ps, cb.ExecutionClient.proxy)
+	for _, n := range all {
+		if n.ExecutionClient != nil {
+			ps = append(ps, n.ExecutionClient.proxy)
 		}
 	}
 	return ps
 }
 
 // Return all beacon clients, even the ones not currently running
-func (cbs Nodes) BeaconClients() BeaconClients {
+func (all Nodes) BeaconClients() BeaconClients {
 	bn := make(BeaconClients, 0)
-	for _, cb := range cbs {
-		if cb.BeaconClient != nil {
-			bn = append(bn, cb.BeaconClient)
+	for _, n := range all {
+		if n.BeaconClient != nil {
+			bn = append(bn, n.BeaconClient)
 		}
 	}
 	return bn
 }
 
 // Return all validator clients, even the ones not currently running
-func (cbs Nodes) ValidatorClients() ValidatorClients {
+func (all Nodes) ValidatorClients() ValidatorClients {
 	vc := make(ValidatorClients, 0)
-	for _, cb := range cbs {
-		if cb.ValidatorClient != nil {
-			vc = append(vc, cb.ValidatorClient)
+	for _, n := range all {
+		if n.ValidatorClient != nil {
+			vc = append(vc, n.ValidatorClient)
 		}
 	}
 	return vc
@@ -161,8 +251,8 @@ func (cbs Nodes) ValidatorClients() ValidatorClients {
 func (all Nodes) VerificationNodes() Nodes {
 	// If none is set as verification, then all are verification nodes
 	var any bool
-	for _, cb := range all {
-		if cb.Verification {
+	for _, n := range all {
+		if n.Verification {
 			any = true
 			break
 		}
@@ -172,31 +262,40 @@ func (all Nodes) VerificationNodes() Nodes {
 	}
 
 	res := make(Nodes, 0)
-	for _, cb := range all {
-		if cb.Verification {
-			res = append(res, cb)
+	for _, n := range all {
+		if n.Verification {
+			res = append(res, n)
 		}
 	}
 	return res
 }
 
-func (cbs Nodes) RemoveNodeAsVerifier(id int) error {
-	if id >= len(cbs) {
+func (all Nodes) RemoveNodeAsVerifier(id int) error {
+	if id >= len(all) {
 		return fmt.Errorf("node %d does not exist", id)
 	}
 	var any bool
-	for _, cb := range cbs {
-		if cb.Verification {
+	for _, n := range all {
+		if n.Verification {
 			any = true
 			break
 		}
 	}
 	if any {
-		cbs[id].Verification = false
+		all[id].Verification = false
 	} else {
 		// If no node is set as verifier, we will set all other nodes as verifiers then
-		for i := range cbs {
-			cbs[i].Verification = (i != id)
+		for i := range all {
+			all[i].Verification = (i != id)
+		}
+	}
+	return nil
+}
+
+func (all Nodes) ByValidatorIndex(validatorIndex common.ValidatorIndex) *Node {
+	for _, n := range all {
+		if n.ValidatorClient.ContainsValidatorIndex(validatorIndex) {
+			return n
 		}
 	}
 	return nil

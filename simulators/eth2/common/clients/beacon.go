@@ -38,14 +38,15 @@ const (
 )
 
 type BeaconClient struct {
-	T                *hivesim.T
-	HiveClient       *hivesim.Client
-	ClientType       string
-	OptionsGenerator func() ([]hivesim.StartOption, error)
-	API              *eth2api.Eth2HttpClient
-	genesisTime      common.Timestamp
-	spec             *common.Spec
-	index            int
+	T                     *hivesim.T
+	HiveClient            *hivesim.Client
+	ClientType            string
+	OptionsGenerator      func() ([]hivesim.StartOption, error)
+	API                   *eth2api.Eth2HttpClient
+	genesisTime           common.Timestamp
+	spec                  *common.Spec
+	index                 int
+	genesisValidatorsRoot tree.Root
 }
 
 func NewBeaconClient(
@@ -55,14 +56,16 @@ func NewBeaconClient(
 	genesisTime common.Timestamp,
 	spec *common.Spec,
 	index int,
+	genesisValidatorsRoot tree.Root,
 ) *BeaconClient {
 	return &BeaconClient{
-		T:                t,
-		ClientType:       beaconDef.Name,
-		OptionsGenerator: optionsGenerator,
-		genesisTime:      genesisTime,
-		spec:             spec,
-		index:            index,
+		T:                     t,
+		ClientType:            beaconDef.Name,
+		OptionsGenerator:      optionsGenerator,
+		genesisTime:           genesisTime,
+		spec:                  spec,
+		index:                 index,
+		genesisValidatorsRoot: genesisValidatorsRoot,
 	}
 }
 
@@ -382,6 +385,34 @@ type VersionedBeaconStateResponse struct {
 	*eth2api.VersionedBeaconState
 }
 
+func (vbs *VersionedBeaconStateResponse) CurrentVersion() common.Version {
+	switch state := vbs.Data.(type) {
+	case *phase0.BeaconState:
+		return state.Fork.CurrentVersion
+	case *altair.BeaconState:
+		return state.Fork.CurrentVersion
+	case *bellatrix.BeaconState:
+		return state.Fork.CurrentVersion
+	case *capella.BeaconState:
+		return state.Fork.CurrentVersion
+	}
+	panic("badly formatted beacon state")
+}
+
+func (vbs *VersionedBeaconStateResponse) PreviousVersion() common.Version {
+	switch state := vbs.Data.(type) {
+	case *phase0.BeaconState:
+		return state.Fork.PreviousVersion
+	case *altair.BeaconState:
+		return state.Fork.PreviousVersion
+	case *bellatrix.BeaconState:
+		return state.Fork.PreviousVersion
+	case *capella.BeaconState:
+		return state.Fork.PreviousVersion
+	}
+	panic("badly formatted beacon state")
+}
+
 func (vbs *VersionedBeaconStateResponse) CurrentEpochParticipation() altair.ParticipationRegistry {
 	switch state := vbs.Data.(type) {
 	case *altair.BeaconState:
@@ -493,6 +524,30 @@ func (bn *BeaconClient) StateValidatorBalances(
 	return stateValidatorBalanceResponse, err
 }
 
+func (bn *BeaconClient) ComputeDomain(
+	ctx context.Context,
+	typ common.BLSDomainType,
+	version *common.Version,
+) (common.BLSDomain, error) {
+	if version != nil {
+		return common.ComputeDomain(
+			typ,
+			*version,
+			bn.genesisValidatorsRoot,
+		), nil
+	}
+	// We need to request for head state to know current active version
+	state, err := bn.BeaconStateV2ByBlock(ctx, eth2api.BlockHead)
+	if err != nil {
+		return common.BLSDomain{}, err
+	}
+	return common.ComputeDomain(
+		typ,
+		state.CurrentVersion(),
+		bn.genesisValidatorsRoot,
+	), nil
+}
+
 func (bn *BeaconClient) SubmitPoolBLSToExecutionChange(
 	parentCtx context.Context,
 	l common.SignedBLSToExecutionChanges,
@@ -502,55 +557,13 @@ func (bn *BeaconClient) SubmitPoolBLSToExecutionChange(
 	return beaconapi.SubmitBLSToExecutionChanges(ctx, bn.API, l)
 }
 
-type BeaconClients []*BeaconClient
-
-// Return subset of clients that are currently running
-func (all BeaconClients) Running() BeaconClients {
-	res := make(BeaconClients, 0)
-	for _, bc := range all {
-		if bc.IsRunning() {
-			res = append(res, bc)
-		}
-	}
-	return res
-}
-
-// Returns comma-separated ENRs of all running beacon nodes
-func (beacons BeaconClients) ENRs(parentCtx context.Context) (string, error) {
-	if len(beacons) == 0 {
-		return "", nil
-	}
-	enrs := make([]string, 0)
-	for _, bn := range beacons {
-		if bn.IsRunning() {
-			enr, err := bn.ENR(parentCtx)
-			if err != nil {
-				return "", err
-			}
-			enrs = append(enrs, enr)
-		}
-	}
-	return strings.Join(enrs, ","), nil
-}
-
-// Returns comma-separated P2PAddr of all running beacon nodes
-func (beacons BeaconClients) P2PAddrs(
+func (bn *BeaconClient) SubmitVoluntaryExit(
 	parentCtx context.Context,
-) (string, error) {
-	if len(beacons) == 0 {
-		return "", nil
-	}
-	staticPeers := make([]string, 0)
-	for _, bn := range beacons {
-		if bn.IsRunning() {
-			p2p, err := bn.P2PAddr(parentCtx)
-			if err != nil {
-				return "", err
-			}
-			staticPeers = append(staticPeers, p2p)
-		}
-	}
-	return strings.Join(staticPeers, ","), nil
+	exit *phase0.SignedVoluntaryExit,
+) error {
+	ctx, cancel := utils.ContextTimeoutRPC(parentCtx)
+	defer cancel()
+	return beaconapi.SubmitVoluntaryExit(ctx, bn.API, exit)
 }
 
 func (b *BeaconClient) WaitForExecutionPayload(
@@ -711,6 +724,56 @@ func (bn *BeaconClient) GetBeaconBlockByExecutionHash(
 	return nil, nil
 }
 
+type BeaconClients []*BeaconClient
+
+// Return subset of clients that are currently running
+func (all BeaconClients) Running() BeaconClients {
+	res := make(BeaconClients, 0)
+	for _, bc := range all {
+		if bc.IsRunning() {
+			res = append(res, bc)
+		}
+	}
+	return res
+}
+
+// Returns comma-separated ENRs of all running beacon nodes
+func (beacons BeaconClients) ENRs(parentCtx context.Context) (string, error) {
+	if len(beacons) == 0 {
+		return "", nil
+	}
+	enrs := make([]string, 0)
+	for _, bn := range beacons {
+		if bn.IsRunning() {
+			enr, err := bn.ENR(parentCtx)
+			if err != nil {
+				return "", err
+			}
+			enrs = append(enrs, enr)
+		}
+	}
+	return strings.Join(enrs, ","), nil
+}
+
+// Returns comma-separated P2PAddr of all running beacon nodes
+func (beacons BeaconClients) P2PAddrs(
+	parentCtx context.Context,
+) (string, error) {
+	if len(beacons) == 0 {
+		return "", nil
+	}
+	staticPeers := make([]string, 0)
+	for _, bn := range beacons {
+		if bn.IsRunning() {
+			p2p, err := bn.P2PAddr(parentCtx)
+			if err != nil {
+				return "", err
+			}
+			staticPeers = append(staticPeers, p2p)
+		}
+	}
+	return strings.Join(staticPeers, ","), nil
+}
 func (b BeaconClients) GetBeaconBlockByExecutionHash(
 	parentCtx context.Context,
 	hash ethcommon.Hash,
@@ -769,4 +832,16 @@ func (runningBeacons BeaconClients) PrintStatus(
 			finalized,
 		)
 	}
+}
+
+func (all BeaconClients) SubmitPoolBLSToExecutionChange(
+	parentCtx context.Context,
+	l common.SignedBLSToExecutionChanges,
+) error {
+	for _, b := range all {
+		if err := b.SubmitPoolBLSToExecutionChange(parentCtx, l); err != nil {
+			return err
+		}
+	}
+	return nil
 }

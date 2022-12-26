@@ -5,21 +5,25 @@ import (
 
 	"github.com/ethereum/hive/hivesim"
 	consensus_config "github.com/ethereum/hive/simulators/eth2/common/config/consensus"
+	blsu "github.com/protolambda/bls12-381-util"
+	"github.com/protolambda/zrnt/eth2/beacon/common"
+	"github.com/protolambda/zrnt/eth2/beacon/phase0"
+	"github.com/protolambda/ztyp/tree"
 )
 
 type ValidatorClient struct {
 	T                *hivesim.T
 	HiveClient       *hivesim.Client
 	ClientType       string
-	OptionsGenerator func([]*consensus_config.KeyDetails) ([]hivesim.StartOption, error)
-	Keys             []*consensus_config.KeyDetails
+	OptionsGenerator func(map[common.ValidatorIndex]*consensus_config.KeyDetails) ([]hivesim.StartOption, error)
+	Keys             map[common.ValidatorIndex]*consensus_config.KeyDetails
 }
 
 func NewValidatorClient(
 	t *hivesim.T,
 	validatorDef *hivesim.ClientDefinition,
-	optionsGenerator func([]*consensus_config.KeyDetails) ([]hivesim.StartOption, error),
-	keys []*consensus_config.KeyDetails,
+	optionsGenerator func(map[common.ValidatorIndex]*consensus_config.KeyDetails) ([]hivesim.StartOption, error),
+	keys map[common.ValidatorIndex]*consensus_config.KeyDetails,
 ) *ValidatorClient {
 	return &ValidatorClient{
 		T:                t,
@@ -69,6 +73,81 @@ func (v *ValidatorClient) ContainsKey(pk [48]byte) bool {
 	return false
 }
 
+func (v *ValidatorClient) ContainsValidatorIndex(
+	index common.ValidatorIndex,
+) bool {
+	_, ok := v.Keys[index]
+	return ok
+}
+
+func (v *ValidatorClient) SignBLSToExecutionChange(
+	domain common.BLSDomain,
+	validatorIndex common.ValidatorIndex,
+	executionAddress common.Eth1Address,
+) (*common.SignedBLSToExecutionChange, error) {
+	kd, ok := v.Keys[validatorIndex]
+	if !ok {
+		return nil, fmt.Errorf(
+			"validator client does not contain validator index %d",
+			validatorIndex,
+		)
+	}
+	if len(executionAddress) != 20 {
+		return nil, fmt.Errorf("invalid length for execution address")
+	}
+	kdPubKey := common.BLSPubkey{}
+	copy(kdPubKey[:], kd.WithdrawalPubkey[:])
+	blsToExecChange := common.BLSToExecutionChange{
+		ValidatorIndex:     validatorIndex,
+		FromBLSPubKey:      kdPubKey,
+		ToExecutionAddress: executionAddress,
+	}
+	sigRoot := common.ComputeSigningRoot(
+		blsToExecChange.HashTreeRoot(tree.GetHashFn()),
+		domain,
+	)
+
+	sk := new(blsu.SecretKey)
+	sk.Deserialize(&kd.WithdrawalSecretKey)
+	signature := blsu.Sign(sk, sigRoot[:]).Serialize()
+	return &common.SignedBLSToExecutionChange{
+		BLSToExecutionChange: blsToExecChange,
+		Signature:            common.BLSSignature(signature),
+	}, nil
+}
+
+func (v *ValidatorClient) SignVoluntaryExit(
+	domain common.BLSDomain,
+	epoch common.Epoch,
+	validatorIndex common.ValidatorIndex,
+) (*phase0.SignedVoluntaryExit, error) {
+	kd, ok := v.Keys[validatorIndex]
+	if !ok {
+		return nil, fmt.Errorf(
+			"validator client does not contain validator index %d",
+			validatorIndex,
+		)
+	}
+	kdPubKey := common.BLSPubkey{}
+	copy(kdPubKey[:], kd.ValidatorPubkey[:])
+	voluntaryExit := phase0.VoluntaryExit{
+		Epoch:          epoch,
+		ValidatorIndex: validatorIndex,
+	}
+	sigRoot := common.ComputeSigningRoot(
+		voluntaryExit.HashTreeRoot(tree.GetHashFn()),
+		domain,
+	)
+
+	sk := new(blsu.SecretKey)
+	sk.Deserialize(&kd.WithdrawalSecretKey)
+	signature := blsu.Sign(sk, sigRoot[:]).Serialize()
+	return &phase0.SignedVoluntaryExit{
+		Message:   voluntaryExit,
+		Signature: common.BLSSignature(signature),
+	}, nil
+}
+
 type ValidatorClients []*ValidatorClient
 
 // Return subset of clients that are currently running
@@ -80,4 +159,32 @@ func (all ValidatorClients) Running() ValidatorClients {
 		}
 	}
 	return res
+}
+
+// Returns the validator that contains specified validator index
+func (all ValidatorClients) ByValidatorIndex(
+	validatorIndex common.ValidatorIndex,
+) *ValidatorClient {
+	for _, v := range all {
+		if v.ContainsValidatorIndex(validatorIndex) {
+			return v
+		}
+	}
+	return nil
+}
+
+func (all ValidatorClients) SignBLSToExecutionChange(
+	domain common.BLSDomain,
+	validatorIndex common.ValidatorIndex,
+	executionAddress common.Eth1Address,
+) (*common.SignedBLSToExecutionChange, error) {
+	if v := all.ByValidatorIndex(validatorIndex); v == nil {
+		return nil, fmt.Errorf("validator index %d not found", validatorIndex)
+	} else {
+		return v.SignBLSToExecutionChange(
+			domain,
+			validatorIndex,
+			executionAddress,
+		)
+	}
 }
