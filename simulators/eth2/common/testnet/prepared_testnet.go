@@ -183,6 +183,12 @@ func prepareTestnet(
 		spec.Config.TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH = common.Timestamp(0)
 	}
 
+	// Validators can exit immediately
+	spec.Config.SHARD_COMMITTEE_PERIOD = 0
+
+	// Validators can withdraw immediately
+	spec.Config.MIN_VALIDATOR_WITHDRAWABILITY_DELAY = 0
+
 	// Generate keys opts for validators
 	shares := config.NodeDefinitions.Shares()
 	// ExtraShares defines an extra set of keys that none of the nodes will have.

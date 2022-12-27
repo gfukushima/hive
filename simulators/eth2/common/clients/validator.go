@@ -140,7 +140,7 @@ func (v *ValidatorClient) SignVoluntaryExit(
 	)
 
 	sk := new(blsu.SecretKey)
-	sk.Deserialize(&kd.WithdrawalSecretKey)
+	sk.Deserialize(&kd.ValidatorSecretKey)
 	signature := blsu.Sign(sk, sigRoot[:]).Serialize()
 	return &phase0.SignedVoluntaryExit{
 		Message:   voluntaryExit,
