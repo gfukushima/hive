@@ -300,7 +300,7 @@ func KeyTranches(
 	for _, c := range shares.ValidatorSplits(uint64(len(keys))) {
 		tranche := make(map[common.ValidatorIndex]*KeyDetails)
 		for j := i; j < (i + c); j++ {
-			tranche[common.ValidatorIndex(j)] = keys[i+j]
+			tranche[common.ValidatorIndex(j)] = keys[j]
 		}
 		tranches = append(tranches, tranche)
 		i += c

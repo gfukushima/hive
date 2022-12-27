@@ -140,7 +140,6 @@ func (n *Node) SignBLSToExecutionChange(
 
 func (n *Node) SignSubmitBLSToExecutionChanges(
 	ctx context.Context,
-	epoch common.Epoch,
 	validatorIndexes []common.ValidatorIndex,
 	executionAddresses []common.Eth1Address,
 ) error {
@@ -296,6 +295,45 @@ func (all Nodes) ByValidatorIndex(validatorIndex common.ValidatorIndex) *Node {
 	for _, n := range all {
 		if n.ValidatorClient.ContainsValidatorIndex(validatorIndex) {
 			return n
+		}
+	}
+	return nil
+}
+
+func (all Nodes) SignSubmitBLSToExecutionChanges(
+	ctx context.Context,
+	validatorIndexes []common.ValidatorIndex,
+	executionAddresses []common.Eth1Address,
+) error {
+	if len(validatorIndexes) != len(executionAddresses) {
+		return fmt.Errorf(
+			"incorrect number of validator indexes/execution addresses",
+		)
+	}
+	// First gather all signed changes
+	l := make(common.SignedBLSToExecutionChanges, 0)
+	for i := 0; i < len(validatorIndexes); i++ {
+		n := all.ByValidatorIndex(validatorIndexes[i])
+		if n == nil {
+			return fmt.Errorf(
+				"validator index %d not found",
+				validatorIndexes[i],
+			)
+		}
+		blsToExecChange, err := n.SignBLSToExecutionChange(
+			ctx,
+			validatorIndexes[i],
+			executionAddresses[i],
+		)
+		if err != nil {
+			return err
+		}
+		l = append(l, *blsToExecChange)
+	}
+	// Then send the signed changes
+	for _, n := range all {
+		if err := n.BeaconClient.SubmitPoolBLSToExecutionChange(ctx, l); err != nil {
+			return err
 		}
 	}
 	return nil
