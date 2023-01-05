@@ -4,5 +4,4 @@ use (
 	./common
 	./engine
 	./eth2api
-	./zrnt
 )

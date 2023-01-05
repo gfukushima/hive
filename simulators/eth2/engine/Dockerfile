@@ -11,7 +11,6 @@ RUN apk --no-cache add gcc musl-dev linux-headers cmake make clang build-base cl
 
 # Prepare workspace
 ADD ./eth2api /source/eth2api
-ADD ./zrnt /source/zrnt
 ADD ./common /source/common
 ADD ./engine /source/engine
 ADD ./engine/hive.go.work /source/go.work
