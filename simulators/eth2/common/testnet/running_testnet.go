@@ -341,7 +341,7 @@ func (t *Testnet) WaitForFinality(ctx context.Context) (
 					if ep > 4 && ep > checkpoints.Finalized.Epoch+2 {
 						ch <- res{err: fmt.Errorf("failed to finalize, head slot %d (epoch %d) is more than 2 ahead of finality checkpoint %d", slot, ep, checkpoints.Finalized.Epoch)}
 					} else {
-						ch <- res{i, fmt.Sprintf("beacon %d: slot=%d, head=%s, health=%.2f, exec_payload=%s, justified=%s, finalized=%s", i, slot, head, health, execution, justified, finalized), nil}
+						ch <- res{i, fmt.Sprintf("beacon %d: fork=%s, slot=%d, head=%s, health=%.2f, exec_payload=%s, justified=%s, finalized=%s", i, versionedBlock.Version, slot, head, health, execution, justified, finalized), nil}
 					}
 
 					if (checkpoints.Finalized != common.Checkpoint{}) {
@@ -407,6 +407,7 @@ func (t *Testnet) WaitForExecutionFinality(
 					defer wg.Done()
 					var (
 						slot      common.Slot
+						version   string
 						head      string
 						justified string
 						finalized string
@@ -445,14 +446,17 @@ func (t *Testnet) WaitForExecutionFinality(
 						); err != nil {
 							ch <- res{err: fmt.Errorf("beacon %d: failed to retrieve block: %v", i, err)}
 							return
-						} else if exeuctionPayload, err := versionedBlock.ExecutionPayload(); err == nil {
-							execution = exeuctionPayload.BlockHash
-							executionStr = utils.Shorten(execution.Hex())
+						} else {
+							version = versionedBlock.Version
+							if exeuctionPayload, err := versionedBlock.ExecutionPayload(); err == nil {
+								execution = exeuctionPayload.BlockHash
+								executionStr = utils.Shorten(execution.Hex())
+							}
 						}
 
 					}
 
-					ch <- res{i, fmt.Sprintf("beacon %d: slot=%d, head=%s, finalized_exec_payload=%s, justified=%s, finalized=%s", i, slot, head, executionStr, justified, finalized), nil}
+					ch <- res{i, fmt.Sprintf("beacon %d: fork=%s, slot=%d, head=%s, finalized_exec_payload=%s, justified=%s, finalized=%s", i, version, slot, head, executionStr, justified, finalized), nil}
 					emptyHash := ethcommon.Hash{}
 					if !bytes.Equal(execution[:], emptyHash[:]) {
 						done <- checkpoints.Finalized
@@ -639,9 +643,10 @@ func (t *Testnet) WaitForExecutionPayload(
 					defer wg.Done()
 
 					var (
-						slot   common.Slot
-						head   string
-						health float64
+						slot    common.Slot
+						version string
+						head    string
+						health  float64
 					)
 
 					headInfo, err := b.BlockHeader(ctx, eth2api.BlockHead)
@@ -658,11 +663,26 @@ func (t *Testnet) WaitForExecutionPayload(
 					); err != nil {
 						ch <- res{err: fmt.Errorf("beacon %d: failed to retrieve block: %v", i, err)}
 						return
-					} else if executionPayload, err := versionedBlock.ExecutionPayload(); err == nil {
-						emptyHash := ethcommon.Hash{}
-						if !bytes.Equal(executionPayload.BlockHash[:], emptyHash[:]) {
-							ch <- res{i, fmt.Sprintf("beacon %d: slot=%d, head=%s, health=%.2f, exec_payload=%s", i, slot, head, health, utils.Shorten(executionPayload.BlockHash.Hex())), nil}
-							done <- executionPayload.BlockHash
+					} else {
+						version = versionedBlock.Version
+						if executionPayload, err := versionedBlock.ExecutionPayload(); err == nil {
+							emptyHash := ethcommon.Hash{}
+							if !bytes.Equal(executionPayload.BlockHash[:], emptyHash[:]) {
+								ch <- res{
+									i,
+									fmt.Sprintf(
+										"beacon %d: fork=%s, slot=%d, head=%s, health=%.2f, exec_payload=%s",
+										i,
+										version,
+										slot,
+										head,
+										health,
+										utils.Shorten(executionPayload.BlockHash.Hex()),
+									),
+									nil,
+								}
+								done <- executionPayload.BlockHash
+							}
 						}
 					}
 
@@ -673,7 +693,18 @@ func (t *Testnet) WaitForExecutionPayload(
 						fmt.Printf("WARN: beacon %d: %s\n", i, err)
 					}
 
-					ch <- res{i, fmt.Sprintf("beacon %d: slot=%d, head=%s, health=%.2f, exec_payload=0x000..000", i, slot, head, health), nil}
+					ch <- res{
+						i,
+						fmt.Sprintf(
+							"beacon %d: fork=%s, slot=%d, head=%s, health=%.2f, exec_payload=0x000..000",
+							i,
+							version,
+							slot,
+							head,
+							health,
+						),
+						nil,
+					}
 
 				}(
 					ctx,

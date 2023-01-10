@@ -794,6 +794,7 @@ func (runningBeacons BeaconClients) PrintStatus(
 	for i, b := range runningBeacons {
 		var (
 			slot      common.Slot
+			version   string
 			head      string
 			justified string
 			finalized string
@@ -815,6 +816,7 @@ func (runningBeacons BeaconClients) PrintStatus(
 			finalized = utils.Shorten(checkpoints.Finalized.String())
 		}
 		if versionedBlock, err := b.BlockV2(ctx, eth2api.BlockHead); err == nil {
+			version = versionedBlock.Version
 			if executionPayload, err := versionedBlock.ExecutionPayload(); err == nil {
 				execution = utils.Shorten(
 					executionPayload.BlockHash.String(),
@@ -823,8 +825,9 @@ func (runningBeacons BeaconClients) PrintStatus(
 		}
 
 		l.Logf(
-			"beacon %d: slot=%d, head=%s, exec_payload=%s, justified=%s, finalized=%s",
+			"beacon %d: fork=%s, slot=%d, head=%s, exec_payload=%s, justified=%s, finalized=%s",
 			i,
+			version,
 			slot,
 			head,
 			execution,
