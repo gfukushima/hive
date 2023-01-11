@@ -185,6 +185,7 @@ func prepareTestnet(
 
 	// Validators can exit immediately
 	spec.Config.SHARD_COMMITTEE_PERIOD = 0
+	spec.Config.CHURN_LIMIT_QUOTIENT = 2
 
 	// Validators can withdraw immediately
 	spec.Config.MIN_VALIDATOR_WITHDRAWABILITY_DELAY = 0

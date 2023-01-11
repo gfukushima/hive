@@ -176,7 +176,7 @@ func BuildBeaconState(
 	if err != nil {
 		return nil, err
 	}
-	// Process activations
+	// Process activations and exits
 	for i := 0; i < len(validators); i++ {
 		val, err := vals.Validator(common.ValidatorIndex(i))
 		if err != nil {
@@ -194,7 +194,32 @@ func BuildBeaconState(
 				return nil, err
 			}
 		}
+		// Process exits/slashings
+		slashings, err := state.Slashings()
+		if err != nil {
+			return nil, err
+		}
+		if keys[i].Exited || keys[i].Slashed {
+			exit_epoch := common.GENESIS_EPOCH
+			val.SetExitEpoch(exit_epoch)
+			val.SetWithdrawableEpoch(
+				exit_epoch + spec.MIN_VALIDATOR_WITHDRAWABILITY_DELAY,
+			)
+			if keys[i].Slashed {
+				val.MakeSlashed()
+
+				bal, err := val.EffectiveBalance()
+				if err != nil {
+					return nil, err
+				}
+
+				if err := slashings.AddSlashing(exit_epoch, bal); err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
+
 	if err := state.SetGenesisValidatorsRoot(vals.HashTreeRoot(tree.GetHashFn())); err != nil {
 		return nil, err
 	}
