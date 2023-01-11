@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"golang.org/x/exp/slices"
+
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/hive/hivesim"
 	cg "github.com/ethereum/hive/simulators/eth2/common/chain_generators"
@@ -57,6 +59,26 @@ func (nodes NodeDefinitions) Shares() []uint64 {
 		shares[i] = n.ValidatorShares
 	}
 	return shares
+}
+
+func (all NodeDefinitions) FilterByCL(filter []string) NodeDefinitions {
+	ret := make(NodeDefinitions, 0)
+	for _, n := range all {
+		if slices.Contains(filter, n.ConsensusClient) {
+			ret = append(ret, n)
+		}
+	}
+	return ret
+}
+
+func (all NodeDefinitions) FilterByEL(filter []string) NodeDefinitions {
+	ret := make(NodeDefinitions, 0)
+	for _, n := range all {
+		if slices.Contains(filter, n.ExecutionClient) {
+			ret = append(ret, n)
+		}
+	}
+	return ret
 }
 
 // A node bundles together:
@@ -114,17 +136,31 @@ func (n *Node) Shutdown() error {
 	return nil
 }
 
+func (n *Node) ClientNames() string {
+	var name string
+	if n.ExecutionClient != nil {
+		name = n.ExecutionClient.ClientType
+	}
+	if n.BeaconClient != nil {
+		name = fmt.Sprintf("%s/%s", name, n.BeaconClient.ClientName())
+	}
+	return name
+}
+
+func (n *Node) IsRunning() bool {
+	return n.ExecutionClient.IsRunning() && n.BeaconClient.IsRunning()
+}
+
 // Validator operations
 func (n *Node) SignBLSToExecutionChange(
 	ctx context.Context,
-	validatorIndex common.ValidatorIndex,
-	executionAddress common.Eth1Address,
+	blsToExecutionChangeInfo BLSToExecutionChangeInfo,
 ) (*common.SignedBLSToExecutionChange, error) {
 	vc, bn := n.ValidatorClient, n.BeaconClient
-	if !vc.ContainsValidatorIndex(validatorIndex) {
+	if !vc.ContainsValidatorIndex(blsToExecutionChangeInfo.ValidatorIndex) {
 		return nil, fmt.Errorf(
 			"validator does not contain specified validator index %d",
-			validatorIndex,
+			blsToExecutionChangeInfo.ValidatorIndex,
 		)
 	}
 	if domain, err := bn.ComputeDomain(
@@ -134,26 +170,19 @@ func (n *Node) SignBLSToExecutionChange(
 	); err != nil {
 		return nil, err
 	} else {
-		return vc.SignBLSToExecutionChange(domain, validatorIndex, executionAddress)
+		return vc.SignBLSToExecutionChange(domain, blsToExecutionChangeInfo)
 	}
 }
 
 func (n *Node) SignSubmitBLSToExecutionChanges(
 	ctx context.Context,
-	validatorIndexes []common.ValidatorIndex,
-	executionAddresses []common.Eth1Address,
+	blsToExecutionChangesInfo []BLSToExecutionChangeInfo,
 ) error {
-	if len(validatorIndexes) != len(executionAddresses) {
-		return fmt.Errorf(
-			"incorrect number of validator indexes/execution addresses",
-		)
-	}
 	l := make(common.SignedBLSToExecutionChanges, 0)
-	for i := 0; i < len(validatorIndexes); i++ {
+	for _, c := range blsToExecutionChangesInfo {
 		blsToExecChange, err := n.SignBLSToExecutionChange(
 			ctx,
-			validatorIndexes[i],
-			executionAddresses[i],
+			c,
 		)
 		if err != nil {
 			return err
@@ -269,6 +298,37 @@ func (all Nodes) VerificationNodes() Nodes {
 	return res
 }
 
+// Return subset of nodes that are currently running
+func (all Nodes) Running() Nodes {
+	res := make(Nodes, 0)
+	for _, n := range all {
+		if n.IsRunning() {
+			res = append(res, n)
+		}
+	}
+	return res
+}
+
+func (all Nodes) FilterByCL(filter []string) Nodes {
+	ret := make(Nodes, 0)
+	for _, n := range all {
+		if slices.Contains(filter, n.BeaconClient.ClientName()) {
+			ret = append(ret, n)
+		}
+	}
+	return ret
+}
+
+func (all Nodes) FilterByEL(filter []string) Nodes {
+	ret := make(Nodes, 0)
+	for _, n := range all {
+		if slices.Contains(filter, n.ExecutionClient.ClientType) {
+			ret = append(ret, n)
+		}
+	}
+	return ret
+}
+
 func (all Nodes) RemoveNodeAsVerifier(id int) error {
 	if id >= len(all) {
 		return fmt.Errorf("node %d does not exist", id)
@@ -302,28 +362,21 @@ func (all Nodes) ByValidatorIndex(validatorIndex common.ValidatorIndex) *Node {
 
 func (all Nodes) SignSubmitBLSToExecutionChanges(
 	ctx context.Context,
-	validatorIndexes []common.ValidatorIndex,
-	executionAddresses []common.Eth1Address,
+	blsToExecutionChanges []BLSToExecutionChangeInfo,
 ) error {
-	if len(validatorIndexes) != len(executionAddresses) {
-		return fmt.Errorf(
-			"incorrect number of validator indexes/execution addresses",
-		)
-	}
 	// First gather all signed changes
 	l := make(common.SignedBLSToExecutionChanges, 0)
-	for i := 0; i < len(validatorIndexes); i++ {
-		n := all.ByValidatorIndex(validatorIndexes[i])
+	for _, c := range blsToExecutionChanges {
+		n := all.ByValidatorIndex(c.ValidatorIndex)
 		if n == nil {
 			return fmt.Errorf(
 				"validator index %d not found",
-				validatorIndexes[i],
+				c.ValidatorIndex,
 			)
 		}
 		blsToExecChange, err := n.SignBLSToExecutionChange(
 			ctx,
-			validatorIndexes[i],
-			executionAddresses[i],
+			c,
 		)
 		if err != nil {
 			return err

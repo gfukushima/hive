@@ -80,27 +80,31 @@ func (v *ValidatorClient) ContainsValidatorIndex(
 	return ok
 }
 
+type BLSToExecutionChangeInfo struct {
+	common.ValidatorIndex
+	common.Eth1Address
+}
+
 func (v *ValidatorClient) SignBLSToExecutionChange(
 	domain common.BLSDomain,
-	validatorIndex common.ValidatorIndex,
-	executionAddress common.Eth1Address,
+	c BLSToExecutionChangeInfo,
 ) (*common.SignedBLSToExecutionChange, error) {
-	kd, ok := v.Keys[validatorIndex]
+	kd, ok := v.Keys[c.ValidatorIndex]
 	if !ok {
 		return nil, fmt.Errorf(
 			"validator client does not contain validator index %d",
-			validatorIndex,
+			c.ValidatorIndex,
 		)
 	}
-	if len(executionAddress) != 20 {
+	if len(c.Eth1Address) != 20 {
 		return nil, fmt.Errorf("invalid length for execution address")
 	}
 	kdPubKey := common.BLSPubkey{}
 	copy(kdPubKey[:], kd.WithdrawalPubkey[:])
 	blsToExecChange := common.BLSToExecutionChange{
-		ValidatorIndex:     validatorIndex,
+		ValidatorIndex:     c.ValidatorIndex,
 		FromBLSPubKey:      kdPubKey,
-		ToExecutionAddress: executionAddress,
+		ToExecutionAddress: c.Eth1Address,
 	}
 	sigRoot := common.ComputeSigningRoot(
 		blsToExecChange.HashTreeRoot(tree.GetHashFn()),
@@ -175,16 +179,17 @@ func (all ValidatorClients) ByValidatorIndex(
 
 func (all ValidatorClients) SignBLSToExecutionChange(
 	domain common.BLSDomain,
-	validatorIndex common.ValidatorIndex,
-	executionAddress common.Eth1Address,
+	c BLSToExecutionChangeInfo,
 ) (*common.SignedBLSToExecutionChange, error) {
-	if v := all.ByValidatorIndex(validatorIndex); v == nil {
-		return nil, fmt.Errorf("validator index %d not found", validatorIndex)
+	if v := all.ByValidatorIndex(c.ValidatorIndex); v == nil {
+		return nil, fmt.Errorf(
+			"validator index %d not found",
+			c.ValidatorIndex,
+		)
 	} else {
 		return v.SignBLSToExecutionChange(
 			domain,
-			validatorIndex,
-			executionAddress,
+			c,
 		)
 	}
 }

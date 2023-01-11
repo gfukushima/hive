@@ -129,6 +129,14 @@ func (bn *BeaconClient) EnodeURL() (string, error) {
 	)
 }
 
+func (bn *BeaconClient) ClientName() string {
+	name := bn.ClientType
+	if len(name) > 3 && name[len(name)-3:] == "-bn" {
+		name = name[:len(name)-3]
+	}
+	return name
+}
+
 // Beacon API wrappers
 type VersionedSignedBeaconBlock struct {
 	*eth2api.VersionedSignedBeaconBlock
@@ -140,7 +148,7 @@ func (versionedBlock *VersionedSignedBeaconBlock) ContainsExecutionPayload() boo
 }
 
 func (versionedBlock *VersionedSignedBeaconBlock) ExecutionPayload() (api.ExecutableData, error) {
-	var result = api.ExecutableData{}
+	result := api.ExecutableData{}
 	switch v := versionedBlock.Data.(type) {
 	case *bellatrix.SignedBeaconBlock:
 		execPayload := v.Message.Body.ExecutionPayload
@@ -599,7 +607,11 @@ func (bn *BeaconClient) SubmitVoluntaryExit(
 func (b *BeaconClient) WaitForExecutionPayload(
 	ctx context.Context,
 ) (ethcommon.Hash, error) {
-	fmt.Printf("Waiting for execution payload on beacon %d\n", b.index)
+	fmt.Printf(
+		"Waiting for execution payload on beacon %d (%s)\n",
+		b.index,
+		b.ClientName(),
+	)
 	slotDuration := time.Duration(b.spec.SECONDS_PER_SLOT) * time.Second
 	timer := time.NewTicker(slotDuration)
 
@@ -634,8 +646,9 @@ func (b *BeaconClient) WaitForExecutionPayload(
 			}
 			zero := ethcommon.Hash{}
 			fmt.Printf(
-				"WaitForExecutionPayload: beacon %d: slot=%d, realTimeSlot=%d, head=%s, exec=%s\n",
+				"WaitForExecutionPayload: beacon %d (%s): slot=%d, realTimeSlot=%d, head=%s, exec=%s\n",
 				b.index,
+				b.ClientName(),
 				headInfo.Header.Message.Slot,
 				realTimeSlot,
 				utils.Shorten(headInfo.Root.String()),
@@ -653,7 +666,10 @@ func (b *BeaconClient) WaitForOptimisticState(
 	blockID eth2api.BlockId,
 	optimistic bool,
 ) (*eth2api.BeaconBlockHeaderAndInfo, error) {
-	fmt.Printf("Waiting for optimistic sync on beacon %d\n", b.index)
+	fmt.Printf("Waiting for optimistic sync on beacon %d (%s)\n",
+		b.index,
+		b.ClientName(),
+	)
 	slotDuration := time.Duration(b.spec.SECONDS_PER_SLOT) * time.Second
 	timer := time.NewTicker(slotDuration)
 
@@ -804,6 +820,7 @@ func (beacons BeaconClients) P2PAddrs(
 	}
 	return strings.Join(staticPeers, ","), nil
 }
+
 func (b BeaconClients) GetBeaconBlockByExecutionHash(
 	parentCtx context.Context,
 	hash ethcommon.Hash,
@@ -855,8 +872,9 @@ func (runningBeacons BeaconClients) PrintStatus(
 		}
 
 		l.Logf(
-			"beacon %d: fork=%s, slot=%d, head=%s, exec_payload=%s, justified=%s, finalized=%s",
+			"beacon %d (%s): fork=%s, slot=%d, head=%s, exec_payload=%s, justified=%s, finalized=%s",
 			i,
+			b.ClientName(),
 			version,
 			slot,
 			head,
