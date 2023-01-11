@@ -496,6 +496,36 @@ func (bn *BeaconClient) BeaconStateV2ByBlock(
 	)
 }
 
+func (bn *BeaconClient) StateValidators(
+	parentCtx context.Context,
+	stateId eth2api.StateId,
+	validatorIds []eth2api.ValidatorId,
+	statusFilter []eth2api.ValidatorStatus,
+) ([]eth2api.ValidatorResponse, error) {
+	var (
+		stateValidatorResponse = make(
+			[]eth2api.ValidatorResponse,
+			0,
+		)
+		exists bool
+		err    error
+	)
+	ctx, cancel := utils.ContextTimeoutRPC(parentCtx)
+	defer cancel()
+	exists, err = beaconapi.StateValidators(
+		ctx,
+		bn.API,
+		stateId,
+		validatorIds,
+		statusFilter,
+		&stateValidatorResponse,
+	)
+	if !exists {
+		return nil, fmt.Errorf("endpoint not found on beacon client")
+	}
+	return stateValidatorResponse, err
+}
+
 func (bn *BeaconClient) StateValidatorBalances(
 	parentCtx context.Context,
 	stateId eth2api.StateId,
