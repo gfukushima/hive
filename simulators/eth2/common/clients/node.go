@@ -53,6 +53,19 @@ func (n *NodeDefinition) ValidatorClientName() string {
 
 type NodeDefinitions []NodeDefinition
 
+func (nodes NodeDefinitions) ClientTypes() []string {
+	types := make([]string, 0)
+	for _, n := range nodes {
+		if !slices.Contains(types, n.ExecutionClient) {
+			types = append(types, n.ExecutionClient)
+		}
+		if !slices.Contains(types, n.ConsensusClient) {
+			types = append(types, n.ConsensusClient)
+		}
+	}
+	return types
+}
+
 func (nodes NodeDefinitions) Shares() []uint64 {
 	shares := make([]uint64, len(nodes))
 	for i, n := range nodes {
