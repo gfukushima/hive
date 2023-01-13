@@ -35,6 +35,8 @@ type Testnet struct {
 	spec *common.Spec
 	// Execution chain configuration and genesis info
 	eth1Genesis *execution_config.ExecutionGenesis
+	// Consensus genesis state
+	eth2GenesisState common.BeaconState
 }
 
 type ActiveSpec struct {
@@ -99,6 +101,10 @@ func (t *Testnet) GenesisTime() common.Timestamp {
 
 func (t *Testnet) GenesisTimeUnix() time.Time {
 	return time.Unix(int64(t.genesisTime), 0)
+}
+
+func (t *Testnet) GenesisBeaconState() common.BeaconState {
+	return t.eth2GenesisState
 }
 
 func (t *Testnet) GenesisValidatorsRoot() common.Root {
@@ -321,7 +327,8 @@ func (t *Testnet) WaitForFork(ctx context.Context, fork string) error {
 								i,
 								n.ClientNames(),
 								err,
-							)}
+							),
+						}
 						return
 					}
 					if executionPayload, err := versionedBlock.ExecutionPayload(); err == nil {

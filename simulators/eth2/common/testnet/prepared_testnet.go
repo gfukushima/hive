@@ -298,6 +298,7 @@ func (p *PreparedTestnet) createTestnet(t *hivesim.T) *Testnet {
 		genesisValidatorsRoot: genesisValidatorsRoot,
 		spec:                  p.spec,
 		eth1Genesis:           p.eth1Genesis,
+		eth2GenesisState:      p.eth2Genesis,
 	}
 }
 
