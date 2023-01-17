@@ -179,7 +179,7 @@ func (n *Node) SignBLSToExecutionChange(
 	if domain, err := bn.ComputeDomain(
 		ctx,
 		common.DOMAIN_BLS_TO_EXECUTION_CHANGE,
-		&bn.spec.CAPELLA_FORK_VERSION,
+		&bn.spec.GENESIS_FORK_VERSION,
 	); err != nil {
 		return nil, err
 	} else {
