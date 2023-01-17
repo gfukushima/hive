@@ -9,6 +9,7 @@ import (
 	"time"
 
 	ethcommon "github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
 
 	"github.com/protolambda/eth2api"
 	"github.com/protolambda/zrnt/eth2/beacon/altair"
@@ -109,6 +110,10 @@ func (t *Testnet) GenesisBeaconState() common.BeaconState {
 
 func (t *Testnet) GenesisValidatorsRoot() common.Root {
 	return t.genesisValidatorsRoot
+}
+
+func (t *Testnet) ExecutionGenesis() *core.Genesis {
+	return t.eth1Genesis.Genesis
 }
 
 func StartTestnet(

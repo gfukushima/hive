@@ -349,7 +349,31 @@ func (p *PreparedTestnet) prepareExecutionNode(
 					),
 				},
 			)
+		} else {
+			genesis := testnet.ExecutionGenesis()
+			genesisBlock := genesis.ToBlock()
+			if genesis.Config.TerminalTotalDifficulty.Cmp(genesisBlock.Difficulty()) <= 0 {
+				opts = append(
+					opts,
+					hivesim.Params{
+						"HIVE_TERMINAL_BLOCK_HASH": fmt.Sprintf(
+							"%s",
+							genesisBlock.Hash(),
+						),
+					},
+				)
+				opts = append(
+					opts,
+					hivesim.Params{
+						"HIVE_TERMINAL_BLOCK_NUMBER": fmt.Sprintf(
+							"%d",
+							genesisBlock.NumberU64(),
+						),
+					},
+				)
+			}
 		}
+
 		if len(chain) > 0 {
 			// Bundle the chain into the container
 			chainParam, err := el.ChainBundle(chain)
