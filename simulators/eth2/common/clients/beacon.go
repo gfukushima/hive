@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"net/http"
 	"strings"
 	"time"
@@ -194,8 +193,7 @@ func (versionedBlock *VersionedSignedBeaconBlock) ExecutionPayload() (api.Execut
 			withdrawal.Index = uint64(w.Index)
 			withdrawal.Validator = uint64(w.ValidatorIndex)
 			copy(withdrawal.Address[:], w.Address[:])
-			withdrawal.Amount = big.NewInt(int64(w.Amount))
-			withdrawal.Amount.Mul(withdrawal.Amount, big.NewInt(1e9))
+			withdrawal.Amount = uint64(w.Amount)
 			result.Withdrawals = append(result.Withdrawals, withdrawal)
 		}
 	default:

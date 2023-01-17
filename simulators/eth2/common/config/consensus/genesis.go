@@ -19,7 +19,7 @@ import (
 func genesisPayloadHeader(
 	eth1GenesisBlock *types.Block,
 	spec *common.Spec,
-) (*common.ExecutionPayloadHeader, error) {
+) (*bellatrix.ExecutionPayloadHeader, error) {
 	extra := eth1GenesisBlock.Extra()
 	if len(extra) > common.MAX_EXTRA_DATA_BYTES {
 		return nil, fmt.Errorf(
@@ -39,7 +39,7 @@ func genesisPayloadHeader(
 		return nil, fmt.Errorf("basefee larger than 2^256-1")
 	}
 
-	return &common.ExecutionPayloadHeader{
+	return &bellatrix.ExecutionPayloadHeader{
 		ParentHash:    common.Root(eth1GenesisBlock.ParentHash()),
 		FeeRecipient:  common.Eth1Address(eth1GenesisBlock.Coinbase()),
 		StateRoot:     common.Bytes32(eth1GenesisBlock.Root()),
@@ -267,7 +267,7 @@ func BuildBeaconState(
 		tdd := uint256.Int(spec.TERMINAL_TOTAL_DIFFICULTY)
 		embedExecAtGenesis := tdd.ToBig().Cmp(eth1Genesis.Difficulty) < 0
 
-		var execPayloadHeader *common.ExecutionPayloadHeader
+		var execPayloadHeader *bellatrix.ExecutionPayloadHeader
 		if embedExecAtGenesis {
 			execPayloadHeader, err = genesisPayloadHeader(
 				eth1GenesisBlock,
@@ -279,7 +279,7 @@ func BuildBeaconState(
 		} else {
 			// we didn't build any on the eth1 chain though,
 			// so we just put the genesis hash here (it could be any block from eth1 chain before TTD that is not ahead of eth2)
-			execPayloadHeader = new(common.ExecutionPayloadHeader)
+			execPayloadHeader = new(bellatrix.ExecutionPayloadHeader)
 		}
 
 		if err := st.SetLatestExecutionPayloadHeader(execPayloadHeader); err != nil {

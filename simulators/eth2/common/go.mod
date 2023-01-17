@@ -13,11 +13,12 @@ require (
 	github.com/protolambda/bls12-381-util v0.0.0-20210720105258-a772f2aac13e
 	github.com/protolambda/eth2api v0.0.0-20220822011642-f7735dd471e0
 	github.com/protolambda/go-keystorev4 v0.0.0-20211007151826-f20444f6d564
-	github.com/protolambda/zrnt v0.29.0
+	github.com/protolambda/zrnt v0.30.0
 	github.com/protolambda/ztyp v0.2.2
 	github.com/rauljordan/engine-proxy v0.0.0-20220517190449-e62b2e2f6e27
 	github.com/tyler-smith/go-bip39 v1.1.0
 	github.com/wealdtech/go-eth2-util v1.8.0
+	golang.org/x/exp v0.0.0-20230108222341-4b8118a2686a
 	gopkg.in/yaml.v2 v2.4.0
 )
 
@@ -56,13 +57,12 @@ require (
 	github.com/wealdtech/go-eth2-types/v2 v2.8.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	golang.org/x/crypto v0.4.0 // indirect
-	golang.org/x/exp v0.0.0-20230108222341-4b8118a2686a // indirect
 	golang.org/x/sys v0.3.0 // indirect
 	golang.org/x/text v0.5.0 // indirect
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/ethereum/go-ethereum => github.com/lightclient/go-ethereum v1.10.10-0.20221214185816-4ae8550b5d69
-
 replace github.com/rauljordan/engine-proxy => github.com/marioevz/engine-proxy v0.0.0-20220617181151-e8661eb39eea
+
+replace github.com/ethereum/go-ethereum v1.10.26 => github.com/lightclient/go-ethereum v1.10.10-0.20230116085521-6ab6d738866f

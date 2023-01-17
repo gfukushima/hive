@@ -161,7 +161,7 @@ func prepareTestnet(
 		)
 	}
 	spec.Config.CAPELLA_FORK_VERSION = common.Version{0x03, 0x00, 0x00, 0x0a}
-	spec.Config.SHARDING_FORK_VERSION = common.Version{0x04, 0x00, 0x00, 0x0a}
+	spec.Config.DENEB_FORK_VERSION = common.Version{0x04, 0x00, 0x00, 0x0a}
 	if config.ValidatorCount == nil {
 		t.Fatal(fmt.Errorf("ValidatorCount was not configured"))
 	}
