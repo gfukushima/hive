@@ -52,8 +52,15 @@ besu=/opt/besu/bin/besu
 export BESU_OPTS="-Dsecp256k1.randomize=false"
 
 # Configure logging.
-
-FLAGS="--logging=INFO"
+LOG=info
+case "$HIVE_LOGLEVEL" in
+    0|1) LOG=ERROR ;;
+    2)   LOG=WARN  ;;
+    3)   LOG=INFO  ;;
+    4)   LOG=DEBUG ;;
+    5)   LOG=TRACE ;;
+esac
+FLAGS="--logging=$LOG"
 
 # Configure the chain.
 jq -f /mapper.jq /genesis.json > /besugenesis.json
@@ -92,21 +99,21 @@ if [ -d /blocks ]; then
     IMPORTFLAGS="$IMPORTFLAGS $blocks"
 fi
 
-if [ "$HIVE_BOOTNODE" != "" ]; then
-    # Configure mining.
-    if [ "$HIVE_MINER" != "" ]; then
-        FLAGS="$FLAGS --miner-enabled --miner-coinbase=$HIVE_MINER"
-        # For clique mining, besu uses the node key as the block signing key.
-        if [ "$HIVE_CLIQUE_PRIVATEKEY" != "" ]; then
-            echo "Importing clique signing key as node key..."
-            echo "$HIVE_CLIQUE_PRIVATEKEY" > /opt/besu/key
-        fi
+
+# Configure mining.
+if [ "$HIVE_MINER" != "" ]; then
+    FLAGS="$FLAGS --miner-enabled --miner-coinbase=$HIVE_MINER"
+    # For clique mining, besu uses the node key as the block signing key.
+    if [ "$HIVE_CLIQUE_PRIVATEKEY" != "" ]; then
+        echo "Importing clique signing key as node key..."
+        echo "$HIVE_CLIQUE_PRIVATEKEY" > /opt/besu/key
     fi
-    if [ "$HIVE_MINER_EXTRA" != "" ]; then
-        FLAGS="$FLAGS --miner-extra-data=$HIVE_MINER_EXTRA"
-    fi
-    FLAGS="$FLAGS --min-gas-price=16 --tx-pool-price-bump=0"
 fi
+if [ "$HIVE_MINER_EXTRA" != "" ]; then
+    FLAGS="$FLAGS --miner-extra-data=$HIVE_MINER_EXTRA"
+fi
+FLAGS="$FLAGS --min-gas-price=1 --tx-pool-price-bump=0 --tx-pool-limit-by-account-percentage=1"
+
 # Configure peer-to-peer networking.
 if [ "$HIVE_BOOTNODE" != "" ]; then
     FLAGS="$FLAGS --bootnodes=$HIVE_BOOTNODE"
@@ -125,7 +132,7 @@ fi
 if [ "$HIVE_NODETYPE" == "light" ]; then
     echo "Ignoring HIVE_NODETYPE == light: besu does not support light client"
 elif [ "$HIVE_NODETYPE" == "" ] && [ "$HIVE_TERMINAL_TOTAL_DIFFICULTY" == "" ]; then
-    FLAGS="$FLAGS --sync-mode=FAST --fast-sync-min-peers=1 --Xsynchronizer-fast-sync-pivot-distance=0"
+    FLAGS="$FLAGS --sync-mode=X_SNAP"
 fi
 
 # Configure RPC.
@@ -144,8 +151,6 @@ if [ "$HIVE_TERMINAL_TOTAL_DIFFICULTY" != "" ]; then
     echo "0x7365637265747365637265747365637265747365637265747365637265747365" > /jwtsecret
     RPCFLAGS="$RPCFLAGS --engine-host-allowlist=* --engine-jwt-enabled --engine-jwt-secret /jwtsecret"
 fi
-
-FLAGS="$FLAGS --tx-pool-limit-by-account-percentage=0.01"
 
 # Start Besu.
 if [ -z "$HAS_IMPORT" ]; then

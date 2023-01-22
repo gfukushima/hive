@@ -731,7 +731,7 @@ func (n *GethNode) GetPayloadV2(ctx context.Context, payloadId *beacon.PayloadID
 	if p == nil || err != nil {
 		return beacon.ExecutableData{}, nil, err
 	}
-	return *p, common.Big0, err
+	return *p.ExecutionPayload, p.BlockValue, err
 }
 
 // Eth JSON RPC
@@ -827,6 +827,10 @@ func (n *GethNode) NonceAt(ctx context.Context, account common.Address, blockNum
 		return 0, err
 	}
 	return stateDB.GetNonce(account), nil
+}
+
+func (n *GethNode) TransactionByHash(ctx context.Context, hash common.Hash) (tx *types.Transaction, isPending bool, err error) {
+	panic("NOT IMPLEMENTED")
 }
 
 func (n *GethNode) GetBlockTotalDifficulty(ctx context.Context, hash common.Hash) (*big.Int, error) {

@@ -30,6 +30,7 @@ var (
 	Pending   = big.NewInt(-2)
 	Finalized = big.NewInt(-3)
 	Safe      = big.NewInt(-4)
+	ZeroAddr  = common.Address{}
 )
 
 var Tests = []test.Spec{
@@ -1196,7 +1197,7 @@ var Tests = []test.Spec{
 
 // Invalid Terminal Block in ForkchoiceUpdated: Client must reject ForkchoiceUpdated directives if the referenced HeadBlockHash does not meet the TTD requirement.
 func invalidTerminalBlockForkchoiceUpdated(t *test.Env) {
-	gblock := helper.LoadGenesisBlock(t.ClientFiles["/genesis.json"])
+	gblock := t.Genesis.ToBlock()
 
 	forkchoiceState := api.ForkchoiceStateV1{
 		HeadBlockHash:      gblock.Hash(),
@@ -1218,7 +1219,7 @@ func invalidTerminalBlockForkchoiceUpdated(t *test.Env) {
 
 // Invalid GetPayload Under PoW: Client must reject GetPayload directives under PoW.
 func invalidGetPayloadUnderPoW(t *test.Env) {
-	gblock := helper.LoadGenesisBlock(t.ClientFiles["/genesis.json"])
+	gblock := t.Genesis.ToBlock()
 	// We start in PoW and try to get an invalid Payload, which should produce an error but nothing should be disrupted.
 	r := t.TestEngine.TestEngineGetPayloadV1(&api.PayloadID{1, 2, 3, 4, 5, 6, 7, 8})
 	r.ExpectError()
@@ -1229,7 +1230,7 @@ func invalidGetPayloadUnderPoW(t *test.Env) {
 
 // Invalid Terminal Block in NewPayload: Client must reject NewPayload directives if the referenced ParentHash does not meet the TTD requirement.
 func invalidTerminalBlockNewPayload(t *test.Env) {
-	gblock := helper.LoadGenesisBlock(t.ClientFiles["/genesis.json"])
+	gblock := t.Genesis.ToBlock()
 
 	// Create a dummy payload to send in the NewPayload call
 	payload := api.ExecutableData{
@@ -1496,7 +1497,7 @@ func preTTDFinalizedBlockHash(t *test.Env) {
 	t.CLMock.ProduceBlocks(5, clmock.BlockProcessCallbacks{})
 
 	// Send the Genesis block as forkchoice
-	gblock := helper.LoadGenesisBlock(t.ClientFiles["/genesis.json"])
+	gblock := t.Genesis.ToBlock()
 
 	r := t.TestEngine.TestEngineForkchoiceUpdatedV1(&api.ForkchoiceStateV1{
 		HeadBlockHash:      gblock.Hash(),
@@ -1653,7 +1654,16 @@ func invalidTransitionPayload(t *test.Env) {
 	// Produce two blocks before trying to re-org
 	t.CLMock.ProduceBlocks(2, clmock.BlockProcessCallbacks{
 		OnPayloadProducerSelected: func() {
-			_, err := helper.SendNextTransaction(t.TestContext, t.CLMock.NextBlockProducer, globals.PrevRandaoContractAddr, big1, nil, t.TestTransactionType)
+			_, err := helper.SendNextTransaction(
+				t.TestContext,
+				t.CLMock.NextBlockProducer,
+				&helper.BaseTransactionCreator{
+					Recipient: &globals.PrevRandaoContractAddr,
+					Amount:    big1,
+					Payload:   nil,
+					TxType:    t.TestTransactionType,
+				},
+			)
 			if err != nil {
 				t.Fatalf("FAIL (%s): Error trying to send transaction: %v", t.TestName, err)
 			}
@@ -1711,7 +1721,16 @@ func invalidPayloadTestCaseGen(payloadField helper.InvalidPayloadBlockField, syn
 			if !emptyTxs {
 				// Function to send at least one transaction each block produced
 				// Send the transaction to the globals.PrevRandaoContractAddr
-				_, err := helper.SendNextTransaction(t.TestContext, t.CLMock.NextBlockProducer, globals.PrevRandaoContractAddr, big1, nil, t.TestTransactionType)
+				_, err := helper.SendNextTransaction(
+					t.TestContext,
+					t.CLMock.NextBlockProducer,
+					&helper.BaseTransactionCreator{
+						Recipient: &globals.PrevRandaoContractAddr,
+						Amount:    big1,
+						Payload:   nil,
+						TxType:    t.TestTransactionType,
+					},
+				)
 				if err != nil {
 					t.Fatalf("FAIL (%s): Error trying to send transaction: %v", t.TestName, err)
 				}
@@ -1934,7 +1953,16 @@ func invalidMissingAncestorReOrgGen(invalid_index int, payloadField helper.Inval
 				// Empty Txs Payload with invalid stateRoot discovered an issue in geth sync, hence this is customizable.
 				if !emptyTxs {
 					// Send the transaction to the globals.PrevRandaoContractAddr
-					_, err := helper.SendNextTransaction(t.TestContext, t.CLMock.NextBlockProducer, globals.PrevRandaoContractAddr, big1, nil, t.TestTransactionType)
+					_, err := helper.SendNextTransaction(
+						t.TestContext,
+						t.CLMock.NextBlockProducer,
+						&helper.BaseTransactionCreator{
+							Recipient: &globals.PrevRandaoContractAddr,
+							Amount:    big1,
+							Payload:   nil,
+							TxType:    t.TestTransactionType,
+						},
+					)
 					if err != nil {
 						t.Fatalf("FAIL (%s): Error trying to send transaction: %v", t.TestName, err)
 					}
@@ -2136,7 +2164,16 @@ func (spec InvalidMissingAncestorReOrgSpec) GenerateSync() func(*test.Env) {
 				// Empty Txs Payload with invalid stateRoot discovered an issue in geth sync, hence this is customizable.
 				if !spec.EmptyTransactions {
 					// Send the transaction to the globals.PrevRandaoContractAddr
-					_, err := helper.SendNextTransaction(t.TestContext, t.CLMock.NextBlockProducer, globals.PrevRandaoContractAddr, big1, nil, t.TestTransactionType)
+					_, err := helper.SendNextTransaction(
+						t.TestContext,
+						t.CLMock.NextBlockProducer,
+						&helper.BaseTransactionCreator{
+							Recipient: &globals.PrevRandaoContractAddr,
+							Amount:    big1,
+							Payload:   nil,
+							TxType:    t.TestTransactionType,
+						},
+					)
 					if err != nil {
 						t.Fatalf("FAIL (%s): Error trying to send transaction: %v", t.TestName, err)
 					}
@@ -2221,7 +2258,7 @@ func (spec InvalidMissingAncestorReOrgSpec) GenerateSync() func(*test.Env) {
 						ctx, cancel := context.WithTimeout(t.TestContext, globals.RPCTimeout)
 						defer cancel()
 
-						p := api.BlockToExecutableData(altChainPayloads[i])
+						p := api.BlockToExecutableData(altChainPayloads[i], common.Big0).ExecutionPayload
 						status, err := secondaryClient.NewPayloadV1(ctx, p)
 						if err != nil {
 							t.Fatalf("FAIL (%s): TEST ISSUE - Unable to send new payload: %v", t.TestName, err)
@@ -2284,7 +2321,7 @@ func (spec InvalidMissingAncestorReOrgSpec) GenerateSync() func(*test.Env) {
 				}
 				// If we are syncing through p2p, we need to keep polling until the client syncs the missing payloads
 				for {
-					r := t.TestEngine.TestEngineNewPayloadV1(api.BlockToExecutableData(altChainPayloads[n]))
+					r := t.TestEngine.TestEngineNewPayloadV1(api.BlockToExecutableData(altChainPayloads[n], common.Big0).ExecutionPayload)
 					t.Logf("INFO (%s): Response from main client: %v", t.TestName, r.Status)
 					s := t.TestEngine.TestEngineForkchoiceUpdatedV1(&api.ForkchoiceStateV1{
 						HeadBlockHash:      altChainPayloads[n].Hash(),
@@ -2376,7 +2413,15 @@ func blockStatusExecPayloadGen(transitionBlock bool) func(t *test.Env) {
 		t.CLMock.ProduceSingleBlock(clmock.BlockProcessCallbacks{
 			OnPayloadProducerSelected: func() {
 				var err error
-				tx, err = helper.SendNextTransaction(t.TestContext, t.Engine, (common.Address{}), big1, nil, t.TestTransactionType)
+				tx, err = helper.SendNextTransaction(
+					t.TestContext,
+					t.Engine, &helper.BaseTransactionCreator{
+						Recipient: &ZeroAddr,
+						Amount:    big1,
+						Payload:   nil,
+						TxType:    t.TestTransactionType,
+					},
+				)
 				if err != nil {
 					t.Fatalf("FAIL (%s): Error trying to send transaction: %v", err)
 				}
@@ -2415,7 +2460,16 @@ func blockStatusHeadBlockGen(transitionBlock bool) func(t *test.Env) {
 		t.CLMock.ProduceSingleBlock(clmock.BlockProcessCallbacks{
 			OnPayloadProducerSelected: func() {
 				var err error
-				tx, err = helper.SendNextTransaction(t.TestContext, t.Engine, (common.Address{}), big1, nil, t.TestTransactionType)
+				tx, err = helper.SendNextTransaction(
+					t.TestContext,
+					t.Engine,
+					&helper.BaseTransactionCreator{
+						Recipient: &ZeroAddr,
+						Amount:    big1,
+						Payload:   nil,
+						TxType:    t.TestTransactionType,
+					},
+				)
 				if err != nil {
 					t.Fatalf("FAIL (%s): Error trying to send transaction: %v", t.TestName, err)
 				}
@@ -2479,7 +2533,7 @@ func blockStatusFinalizedBlock(t *test.Env) {
 func safeFinalizedCanonicalChain(t *test.Env) {
 	// Wait until this client catches up with latest PoS Block
 	t.CLMock.WaitForTTD()
-	gblock := helper.LoadGenesisBlock(t.ClientFiles["/genesis.json"])
+	gblock := t.Genesis.ToBlock()
 
 	// At the merge we need to have head equal to the last PoW block, and safe/finalized must return error
 	h := t.TestEngine.TestHeaderByNumber(Head)
@@ -2815,7 +2869,16 @@ func transactionReorg(t *test.Env) {
 				data := common.LeftPadBytes([]byte{byte(i)}, 32)
 				t.Logf("transactionReorg, i=%v, data=%v\n", i, data)
 				var err error
-				tx, err = helper.SendNextTransaction(t.TestContext, t.Engine, sstoreContractAddr, big0, data, t.TestTransactionType)
+				tx, err = helper.SendNextTransaction(
+					t.TestContext,
+					t.Engine,
+					&helper.BaseTransactionCreator{
+						Recipient: &sstoreContractAddr,
+						Amount:    big0,
+						Payload:   data,
+						TxType:    t.TestTransactionType,
+					},
+				)
 				if err != nil {
 					t.Fatalf("FAIL (%s): Error trying to send transaction: %v", t.TestName, err)
 				}
@@ -2914,7 +2977,16 @@ func transactionReorgBlockhash(newNPOnRevert bool) func(t *test.Env) {
 					data := common.LeftPadBytes([]byte{byte(i)}, 32)
 					t.Logf("transactionReorg, i=%v, data=%v\n", i, data)
 					var err error
-					tx, err = helper.SendNextTransaction(t.TestContext, t.Engine, sstoreContractAddr, big0, data, t.TestTransactionType)
+					tx, err = helper.SendNextTransaction(
+						t.TestContext,
+						t.Engine,
+						&helper.BaseTransactionCreator{
+							Recipient: &sstoreContractAddr,
+							Amount:    big0,
+							Payload:   data,
+							TxType:    t.TestTransactionType,
+						},
+					)
 					if err != nil {
 						t.Fatalf("FAIL (%s): Error trying to send transaction: %v", t.TestName, err)
 					}
@@ -3010,7 +3082,16 @@ func sidechainReorg(t *test.Env) {
 	// Produce two payloads, send fcU with first payload, check transaction outcome, then reorg, check transaction outcome again
 
 	// This single transaction will change its outcome based on the payload
-	tx, err := helper.SendNextTransaction(t.TestContext, t.Engine, globals.PrevRandaoContractAddr, big0, nil, t.TestTransactionType)
+	tx, err := helper.SendNextTransaction(
+		t.TestContext,
+		t.Engine,
+		&helper.BaseTransactionCreator{
+			Recipient: &globals.PrevRandaoContractAddr,
+			Amount:    big0,
+			Payload:   nil,
+			TxType:    t.TestTransactionType,
+		},
+	)
 	if err != nil {
 		t.Fatalf("FAIL (%s): Error trying to send transaction: %v", t.TestName, err)
 	}
@@ -3148,7 +3229,16 @@ func inOrderPayloads(t *test.Env) {
 		// We send the transactions after we got the Payload ID, before the CLMocker gets the prepared Payload
 		OnPayloadProducerSelected: func() {
 			for i := 0; i < txPerPayload; i++ {
-				_, err := helper.SendNextTransaction(t.TestContext, t.CLMock.NextBlockProducer, recipient, amountPerTx, nil, t.TestTransactionType)
+				_, err := helper.SendNextTransaction(
+					t.TestContext,
+					t.CLMock.NextBlockProducer,
+					&helper.BaseTransactionCreator{
+						Recipient: &recipient,
+						Amount:    amountPerTx,
+						Payload:   nil,
+						TxType:    t.TestTransactionType,
+					},
+				)
 				if err != nil {
 					t.Fatalf("FAIL (%s): Error trying to send transaction: %v", t.TestName, err)
 				}
@@ -3471,7 +3561,16 @@ func suggestedFeeRecipient(t *test.Env) {
 
 	// Send multiple transactions
 	for i := 0; i < txCount; i++ {
-		_, err := helper.SendNextTransaction(t.TestContext, t.Engine, globals.VaultAccountAddress, big0, nil, t.TestTransactionType)
+		_, err := helper.SendNextTransaction(
+			t.TestContext,
+			t.Engine,
+			&helper.BaseTransactionCreator{
+				Recipient: &globals.VaultAccountAddress,
+				Amount:    big0,
+				Payload:   nil,
+				TxType:    t.TestTransactionType,
+			},
+		)
 		if err != nil {
 			t.Fatalf("FAIL (%s): Error trying to send transaction: %v", t.TestName, err)
 		}
@@ -3531,7 +3630,16 @@ func prevRandaoOpcodeTx(t *test.Env) {
 	// Try to send many transactions before PoW transition to guarantee at least one enters in the block
 	go func(t *test.Env) {
 		for {
-			_, err := helper.SendNextTransaction(t.TestContext, t.Engine, globals.PrevRandaoContractAddr, big0, nil, t.TestTransactionType)
+			_, err := helper.SendNextTransaction(
+				t.TestContext,
+				t.Engine,
+				&helper.BaseTransactionCreator{
+					Recipient: &globals.PrevRandaoContractAddr,
+					Amount:    big0,
+					Payload:   nil,
+					TxType:    t.TestTransactionType,
+				},
+			)
 			if err != nil {
 				t.Fatalf("FAIL (%s): Error trying to send transaction: %v", t.TestName, err)
 			}
@@ -3574,7 +3682,16 @@ func prevRandaoOpcodeTx(t *test.Env) {
 	)
 	t.CLMock.ProduceBlocks(txCount, clmock.BlockProcessCallbacks{
 		OnPayloadProducerSelected: func() {
-			tx, err := helper.SendNextTransaction(t.TestContext, t.Engine, globals.PrevRandaoContractAddr, big0, nil, t.TestTransactionType)
+			tx, err := helper.SendNextTransaction(
+				t.TestContext,
+				t.Engine,
+				&helper.BaseTransactionCreator{
+					Recipient: &globals.PrevRandaoContractAddr,
+					Amount:    big0,
+					Payload:   nil,
+					TxType:    t.TestTransactionType,
+				},
+			)
 			if err != nil {
 				t.Fatalf("FAIL (%s): Error trying to send transaction: %v", t.TestName, err)
 			}
