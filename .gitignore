@@ -3,4 +3,3 @@ workspace
 .idea/
 # build output
 /hive
-cmd/hiveview/hiveview
