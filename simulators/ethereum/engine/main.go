@@ -11,9 +11,9 @@ import (
 	"github.com/ethereum/hive/simulators/ethereum/engine/test"
 
 	suite_auth "github.com/ethereum/hive/simulators/ethereum/engine/suites/auth"
+	suite_cancun "github.com/ethereum/hive/simulators/ethereum/engine/suites/cancun"
 	suite_engine "github.com/ethereum/hive/simulators/ethereum/engine/suites/engine"
 	suite_ex_cap "github.com/ethereum/hive/simulators/ethereum/engine/suites/exchange_capabilities"
-	suite_transition "github.com/ethereum/hive/simulators/ethereum/engine/suites/transition"
 	suite_withdrawals "github.com/ethereum/hive/simulators/ethereum/engine/suites/withdrawals"
 )
 
@@ -24,12 +24,6 @@ func main() {
 			Description: `
 	Test Engine API tests using CL mocker to inject commands into clients after they 
 	have reached the Terminal Total Difficulty.`[1:],
-		}
-		transition = hivesim.Suite{
-			Name: "engine-transition",
-			Description: `
-	Test Engine API tests using CL mocker to inject commands into clients and drive 
-	them through the merge.`[1:],
 		}
 		auth = hivesim.Suite{
 			Name: "engine-auth",
@@ -51,24 +45,29 @@ func main() {
 			Description: `
 	Test Engine API withdrawals, pre/post Shanghai.`[1:],
 		}
+		cancun = hivesim.Suite{
+			Name: "engine-cancun",
+			Description: `
+	Test Engine API on Cancun.`[1:],
+		}
 	)
 
 	simulator := hivesim.New()
 
 	addTestsToSuite(simulator, &engine, specToInterface(suite_engine.Tests), "full")
-	addTestsToSuite(simulator, &transition, specToInterface(suite_transition.Tests), "full")
 	addTestsToSuite(simulator, &auth, specToInterface(suite_auth.Tests), "full")
-	addTestsToSuite(simulator, &excap, specToInterface(suite_ex_cap.Tests), "full")
+	addTestsToSuite(simulator, &excap, suite_ex_cap.Tests, "full")
 	//suite_sync.AddSyncTestsToSuite(simulator, &sync, suite_sync.Tests)
 	addTestsToSuite(simulator, &withdrawals, suite_withdrawals.Tests, "full")
+	addTestsToSuite(simulator, &cancun, suite_cancun.Tests, "full")
 
 	// Mark suites for execution
 	hivesim.MustRunSuite(simulator, engine)
-	hivesim.MustRunSuite(simulator, transition)
 	hivesim.MustRunSuite(simulator, auth)
 	hivesim.MustRunSuite(simulator, excap)
 	hivesim.MustRunSuite(simulator, sync)
 	hivesim.MustRunSuite(simulator, withdrawals)
+	hivesim.MustRunSuite(simulator, cancun)
 }
 
 func specToInterface(src []test.Spec) []test.SpecInterface {
@@ -86,20 +85,25 @@ func addTestsToSuite(sim *hivesim.Simulation, suite *hivesim.Suite, tests []test
 
 		// Load the genesis file specified and dynamically bundle it.
 		genesis := currentTest.GetGenesis()
+		forkConfig := currentTest.GetForkConfig()
+		forkConfig.ConfigGenesis(genesis)
 		genesisStartOption, err := helper.GenesisStartOption(genesis)
 		if err != nil {
 			panic("unable to inject genesis")
 		}
 
 		// Calculate and set the TTD for this test
-		ttd := helper.CalculateRealTTD(genesis, currentTest.GetTTD())
+		ttd := genesis.Config.TerminalTotalDifficulty
 
 		// Configure Forks
 		newParams := globals.DefaultClientEnv.Set("HIVE_TERMINAL_TOTAL_DIFFICULTY", fmt.Sprintf("%d", ttd))
-		if currentTest.GetForkConfig().ShanghaiTimestamp != nil {
-			newParams = newParams.Set("HIVE_SHANGHAI_TIMESTAMP", fmt.Sprintf("%d", currentTest.GetForkConfig().ShanghaiTimestamp))
+		if forkConfig.ShanghaiTimestamp != nil {
+			newParams = newParams.Set("HIVE_SHANGHAI_TIMESTAMP", fmt.Sprintf("%d", forkConfig.ShanghaiTimestamp))
 			// Ensure the merge transition is activated before shanghai.
 			newParams = newParams.Set("HIVE_MERGE_BLOCK_ID", "0")
+			if forkConfig.CancunTimestamp != nil {
+				newParams = newParams.Set("HIVE_CANCUN_TIMESTAMP", fmt.Sprintf("%d", forkConfig.CancunTimestamp))
+			}
 		}
 
 		if nodeType != "" {
@@ -107,7 +111,7 @@ func addTestsToSuite(sim *hivesim.Simulation, suite *hivesim.Suite, tests []test
 		}
 
 		testFiles := hivesim.Params{}
-		if genesis.Difficulty.Cmp(big.NewInt(ttd)) < 0 {
+		if genesis.Difficulty.Cmp(ttd) < 0 {
 
 			if currentTest.GetChainFile() != "" {
 				// We are using a Proof of Work chain file, remove all clique-related settings
@@ -154,11 +158,12 @@ func addTestsToSuite(sim *hivesim.Simulation, suite *hivesim.Suite, tests []test
 						// Run the test case
 						test.Run(
 							currentTest,
-							big.NewInt(ttd),
+							new(big.Int).Set(ttd),
 							timeout,
 							t,
 							c,
 							genesis,
+							&forkConfig,
 							newParams,
 							testFiles,
 						)

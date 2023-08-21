@@ -54,6 +54,7 @@ fi
 # Create the data directory.
 mkdir /erigon-hive-datadir
 FLAGS="$FLAGS --datadir /erigon-hive-datadir"
+FLAGS="$FLAGS --db.size.limit 2GB"
 
 # If a specific network ID is requested, use that
 if [ "$HIVE_NETWORK_ID" != "" ]; then
@@ -135,6 +136,6 @@ if [ "$HIVE_TERMINAL_TOTAL_DIFFICULTY" != "" ]; then
 fi
 
 # Launch the main client.
-FLAGS="$FLAGS --nat=none --externalcl"
+FLAGS="$FLAGS --nat=none"
 echo "Running erigon with flags $FLAGS"
 $erigon $FLAGS

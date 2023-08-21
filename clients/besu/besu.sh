@@ -139,18 +139,23 @@ fi
 # Configure RPC.
 RPCFLAGS="--host-allowlist=*"
 if [ "$HIVE_GRAPHQL_ENABLED" == "" ]; then
-    RPCFLAGS="$RPCFLAGS --rpc-http-enabled --rpc-http-api=ETH,NET,WEB3,ADMIN --rpc-http-host=0.0.0.0"
+    RPCFLAGS="$RPCFLAGS --rpc-http-enabled --rpc-http-api=DEBUG,ETH,NET,WEB3,ADMIN --rpc-http-host=0.0.0.0"
 else
     RPCFLAGS="$RPCFLAGS --graphql-http-enabled --graphql-http-host=0.0.0.0 --graphql-http-port=8545"
 fi
 
 # Enable WebSocket.
-RPCFLAGS="$RPCFLAGS --rpc-ws-enabled --rpc-ws-api=ETH,NET,WEB3,ADMIN --rpc-ws-host=0.0.0.0"
+RPCFLAGS="$RPCFLAGS --rpc-ws-enabled --rpc-ws-api=DEBUG,ETH,NET,WEB3,ADMIN --rpc-ws-host=0.0.0.0"
 
 # Enable merge support if needed
 if [ "$HIVE_TERMINAL_TOTAL_DIFFICULTY" != "" ]; then
     echo "0x7365637265747365637265747365637265747365637265747365637265747365" > /jwtsecret
     RPCFLAGS="$RPCFLAGS --engine-host-allowlist=* --engine-jwt-enabled --engine-jwt-secret /jwtsecret"
+fi
+
+# Enable KZG trusted setup if cancun timestamp is set, needed for custom genesis on Besu wtih Cancun
+if [ "$HIVE_CANCUN_TIMESTAMP" != "" ]; then
+    FLAGS="$FLAGS --kzg-trusted-setup=/trusted_setup.txt"
 fi
 
 # Start Besu.
